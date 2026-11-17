@@ -31,12 +31,26 @@ export function speechSegments(samples: Float32Array, longest = 30 * rate, short
 
 export async function createParakeet(directory: string) {
   const options = { intraOpNumThreads: 2, interOpNumThreads: 1 };
-  const [preprocessor, encoder, decoder, vocabulary] = await Promise.all([
-    InferenceSession.create(join(directory, 'preprocessor.onnx'), options),
-    InferenceSession.create(join(directory, 'encoder-model.q4.onnx'), options),
-    InferenceSession.create(join(directory, 'decoder_joint-model.int8.onnx'), options),
-    readFile(join(directory, 'vocab.txt'), 'utf8'),
-  ]);
+  const loaded = await Promise.allSettled(
+    ['preprocessor.onnx', 'encoder-model.q4.onnx', 'decoder_joint-model.int8.onnx'].map((file) =>
+      InferenceSession.create(join(directory, file), options),
+    ),
+  );
+  const sessions = loaded.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
+  );
+  const vocabulary = await readFile(join(directory, 'vocab.txt'), 'utf8').catch(
+    async (error: unknown) => {
+      await Promise.allSettled(sessions.map((session) => session.release()));
+      throw error;
+    },
+  );
+  const failed = loaded.find((result) => result.status === 'rejected');
+  if (failed) {
+    await Promise.allSettled(sessions.map((session) => session.release()));
+    throw failed.reason;
+  }
+  const [preprocessor, encoder, decoder] = sessions;
   const tokens: string[] = [];
   for (const line of vocabulary.split('\n')) {
     const split = line.lastIndexOf(' ');

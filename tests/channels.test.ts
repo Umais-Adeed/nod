@@ -2542,6 +2542,14 @@ test('local transcription prepares only input assets and keeps voice synthesis u
     (event) => usage.push(event),
   );
   assert.equal(requests.at(-1)?.model, 'parakeet');
+  const working = provider.transcribe!({
+    bytes: new Uint8Array([1]),
+    mimeType: 'audio/wav',
+    name: 'synthetic.wav',
+  });
+  await assert.rejects(provider.selectTranscriptionModel('whisper'), { statusCode: 409 });
+  assert.equal(await working, 'Synthetic recorded words.');
+  assert.equal(provider.transcriptionModel().model, 'parakeet');
   assert.deepEqual(
     usage.map(({ model, status }) => ({ model, status })),
     [{ model: 'parakeet-ultra', status: 'succeeded' }],

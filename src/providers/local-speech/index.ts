@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  SpeechBusyError,
   SpeechProviderError,
   type SpeechProvider,
   type LocalSpeechControls,
@@ -53,6 +54,7 @@ export function createLocalSpeechProvider(options: {
   let status: LocalSpeechStatus = { state: 'not_downloaded' };
   let inputStatus: LocalSpeechStatus = { state: 'not_downloaded' };
   let model: LocalTranscriptionModel = 'whisper';
+  let switching = false;
   const selection = join(options.cacheDir, 'transcription-model.json');
   let child: ChildProcess | undefined;
   let active: Job | undefined;
@@ -338,6 +340,7 @@ export function createLocalSpeechProvider(options: {
     await cached;
     signal?.throwIfAborted();
     if (closed) throw new SpeechProviderError('Local speech is closed.');
+    if (switching) throw new SpeechBusyError('Local speech is busy. Try again when it finishes.');
     if ((transcription ? inputStatus : status).state === 'ready') return;
     if (preparing) {
       const running = preparing;
@@ -419,21 +422,30 @@ export function createLocalSpeechProvider(options: {
     async selectTranscriptionModel(next) {
       await cached;
       if (closed) throw new SpeechProviderError('Local speech is closed.');
-      if (preparing || active || queue.length)
-        throw new SpeechProviderError('Local speech is busy. Try again when it finishes.');
+      if (switching || preparing || active || queue.length)
+        throw new SpeechBusyError('Local speech is busy. Try again when it finishes.');
       if (next === model) return;
-      await mkdir(options.cacheDir, { recursive: true });
-      await writeFile(`${selection}.download`, JSON.stringify({ model: next }), { mode: 0o600 });
-      await rename(`${selection}.download`, selection);
+      const previous = { model, inputStatus };
+      switching = true;
       model = next;
+      inputStatus = { state: 'not_downloaded' };
       stop(new SpeechProviderError('Local speech stopped.'));
-      inputStatus = {
-        state:
+      try {
+        await mkdir(options.cacheDir, { recursive: true });
+        await writeFile(`${selection}.download`, JSON.stringify({ model: next }), { mode: 0o600 });
+        await rename(`${selection}.download`, selection);
+        if (
           (next === 'whisper' && status.state === 'ready') ||
           (await verifySpeechCache(options.cacheDir, true, next))
-            ? 'ready'
-            : 'not_downloaded',
-      };
+        )
+          inputStatus = { state: 'ready' };
+      } catch (error) {
+        model = previous.model;
+        inputStatus = previous.inputStatus;
+        throw error;
+      } finally {
+        switching = false;
+      }
     },
     async synthesize(text, signal, report, synthesis) {
       signal?.throwIfAborted();

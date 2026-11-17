@@ -520,7 +520,10 @@ export function VoiceSettings({ onBusyChange }: { onBusyChange(busy: boolean): v
                         data.localInput?.state === 'downloading'
                       }
                       onClick={() => {
-                        if (choice.id !== transcriptionModel.id)
+                        if (
+                          choice.id !== transcriptionModel.id ||
+                          data.localInput?.state !== 'ready'
+                        )
                           void chooseTranscription(choice.id);
                       }}
                     >

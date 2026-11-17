@@ -1,7 +1,11 @@
 import type { LocalTranscriptionModel, SpeechVoice } from '../shared/speech.ts';
 
 export class SpeechProviderError extends Error {
-  readonly statusCode = 400;
+  readonly statusCode: number = 400;
+}
+
+export class SpeechBusyError extends SpeechProviderError {
+  override readonly statusCode = 409;
 }
 
 export interface SpeechSynthesisOptions {
