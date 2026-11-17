@@ -284,16 +284,19 @@ export function createComposioProxy(options: {
       signal,
     });
     if (!response.ok) {
-      if (options.failure) {
-        await response.body?.cancel();
-        throw new Error(options.failure);
-      }
       const refusal = await read(response, signal)
         .then((text) => JSON.parse(text) as unknown)
         .catch(() => {
           signal.throwIfAborted();
           return undefined;
         });
+      if (options.failure) {
+        const code =
+          refusal && typeof refusal === 'object' && 'error' in refusal ? refusal.error : undefined;
+        throw new Error(
+          `${options.failure} The connection service answered HTTP ${response.status}${typeof code === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? ` (${code})` : ''}.`,
+        );
+      }
       throw new IntegrationConnectionError(
         connectionReason(response.status, false, false) ?? 'unavailable',
         'link',

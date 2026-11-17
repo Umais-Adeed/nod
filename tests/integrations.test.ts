@@ -1097,7 +1097,10 @@ test('managed integration requests bind SDK calls to a private persisted install
   await assert.rejects(session.upload!('GMAIL_SEND_EMAIL', file, undefined, 'ca_fixture_proxy'));
   failUpload = true;
   const beforeUploadFailure = calls.length;
-  await assert.rejects(session.upload!('GMAIL_SEND_EMAIL', file, undefined, 'ca_fixture_proxy'));
+  await assert.rejects(
+    session.upload!('GMAIL_SEND_EMAIL', file, undefined, 'ca_fixture_proxy'),
+    /HTTP 503 \(upload_failed\)/,
+  );
   assert.equal(calls.length, beforeUploadFailure + 1);
   const beforeInvalidUpload = calls.length;
   await assert.rejects(
