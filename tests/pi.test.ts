@@ -6577,6 +6577,13 @@ test('the live line shows a model retry and the text before a tool call while th
   const credential = { type: 'endpoint' as const, url: `http://127.0.0.1:${port}/v1` };
   const [definition] = await createPiModelBackend().catalog('compatible', 'api_key', credential);
   const agent = createPiAgent({
+    createSession: async (options) => {
+      const result = await createAgentSession(options);
+      result.session.settingsManager.applyOverrides({
+        retry: { baseDelayMs: 1, maxAgentDelayMs: 1 },
+      });
+      return result;
+    },
     provider: 'compatible',
     sessionRoot: join(directory, 'sessions'),
     resolve: async () => ({
@@ -8952,6 +8959,9 @@ test('native audio reaches the selected Pi model with tools and survives a reope
     createPiAgent({
       createSession: async (options) => {
         const result = await createAgentSession(options);
+        result.session.settingsManager.applyOverrides({
+          retry: { baseDelayMs: 1, maxAgentDelayMs: 1 },
+        });
         result.session.setActiveToolsByName(result.session.getAllTools().map((tool) => tool.name));
         piSession = result.session;
         return result;
@@ -9314,7 +9324,7 @@ test('native audio reaches the selected Pi model with tools and survives a reope
   });
   await failing.dispose();
   const failedRequests = bodies.slice(beforeFailure);
-  assert.ok(failedRequests.length > 0 && failedRequests.length <= 4);
+  assert.equal(failedRequests.length, 4);
   assert.ok(failedRequests.every((body) => body.model === 'gpt-audio-1.5'));
   assert.ok(failedRequests.every((body) => audio(body).length > 0));
   assert.equal(calls, 1);
