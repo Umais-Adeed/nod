@@ -25,7 +25,7 @@ import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { createServer as createHttpsServer } from 'node:https';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
@@ -628,6 +628,8 @@ async function runningDesktop(
       argv,
       env: typeof environment === 'function' ? environment(dirname(storage.path)) : environment,
       resourcesPath: dirname(storage.path),
+      versions: { electron: '0.0.0' },
+      getSystemVersion: () => '0.0.0',
     },
     ipcMain: ipc,
     autoUpdater: Object.assign(new EventEmitter(), {
@@ -668,6 +670,7 @@ async function runningDesktop(
     resolve,
     fileURLToPath,
     pathToFileURL,
+    homedir,
     mkdir,
     appendFile,
     readFile: (file, ...args) =>
@@ -1443,7 +1446,7 @@ test('native first open waits for consent on disabled and returning profiles', a
 test('Windows onboarding waits for storage before unlocking credentials and exposes prerequisite recovery', async (t) => {
   const revealed = [];
   const cause = `Synthetic WSL missing: ${'x'.repeat(450)} HCS_E_HYPERV_NOT_INSTALLED`;
-  const details = `Error: ${cause}\n${'Synthetic WSL output\n'.repeat(200)}End of native error`;
+  const details = `Error: ${cause}\n${join(homedir(), 'synthetic-folder')}\n${'Synthetic WSL output\n'.repeat(200)}End of native error`;
   const f = await runningDesktop(
     t,
     async () => assert.fail('No backend can run without storage.'),
@@ -1470,11 +1473,18 @@ test('Windows onboarding waits for storage before unlocking credentials and expo
     const showLog = f.handlers.get('nod:startup-log:show');
     await assert.rejects(showLog({ ...event, senderFrame: { url: event.senderFrame.url } }));
     assert.equal(revealed.length, 0);
+    await appendFile(
+      join(f.profileRoot, 'logs', 'startup.log'),
+      'Synthetic earlier line\n'.repeat(4000),
+    );
     await showLog(event);
     assert.deepEqual(revealed, [join(f.profileRoot, 'logs', 'startup.log')]);
     const log = await readFile(revealed[0], 'utf8');
+    assert.ok(log.startsWith('Synthetic earlier line\n'));
+    assert.ok(log.length < 64 * 1024);
     assert.ok(log.includes(cause));
-    assert.ok(log.includes(details));
+    assert.ok(log.includes(details.replaceAll(homedir(), '<home>')));
+    assert.equal(log.includes(homedir()), false);
     assert.equal(f.status().error, cause);
     assert.ok(f.status().details.includes(details));
     assert.ok(f.status().details.includes('NOD_WSL_REQUIRED'));
@@ -2469,7 +2479,7 @@ test('a missing native setup renderer offers explicit recovery without hidden ke
       try {
         const launched = f.launch();
         for (let attempt = 0; !f.windows.length && attempt < 100; attempt++)
-          await new Promise(setImmediate);
+          await new Promise((resolve) => wait(resolve, 5));
         const window = f.windows[0];
         assert.ok(window);
         assert.equal(window.isVisible(), false);
@@ -7580,6 +7590,7 @@ async function updatePreparation({
       engine: undefined,
       closingEngine: false,
       pendingPreload: undefined,
+      updateEvent: async () => {},
       loadRuntime: async (url) =>
         url.endsWith('/windows.mjs')
           ? {
