@@ -702,10 +702,11 @@ export async function createApplication(
 ) {
   const diagnostics: {
     log?: Awaited<ReturnType<typeof createFeedbackLog>>;
+    failures?: Awaited<ReturnType<typeof createFeedbackLog>>;
     failure: FailureLogSink;
   } = {
     failure: (event, error, context) =>
-      diagnostics.log?.record('failure', { event, error, context }, context),
+      diagnostics.failures?.record('failure', { event, error, context }, context),
   };
   try {
     return await withFailureLog(diagnostics.failure, () =>
@@ -713,6 +714,7 @@ export async function createApplication(
     );
   } catch (error) {
     await diagnostics.log?.close().catch(() => {});
+    await diagnostics.failures?.close().catch(() => {});
     try {
       await adapters.analytics?.shutdown();
     } catch {}
@@ -731,7 +733,11 @@ async function initializeApplication(
     heartbeat?: boolean;
     runtimeReady?: Promise<void>;
   },
-  diagnostics: { log?: Awaited<ReturnType<typeof createFeedbackLog>>; failure: FailureLogSink },
+  diagnostics: {
+    log?: Awaited<ReturnType<typeof createFeedbackLog>>;
+    failures?: Awaited<ReturnType<typeof createFeedbackLog>>;
+    failure: FailureLogSink;
+  },
 ) {
   const analytics = await createAnalytics({
     provider: adapters.analytics,
@@ -1251,12 +1257,17 @@ async function initializeApplication(
     trash: adapters.trash,
     available: Boolean(adapters.trash),
   });
+  const preparationBlocked = async () => {
+    if ((await ledger.preparationLimit()).reached)
+      return 'the monthly preparation allowance is reached';
+    const unpriced = adapters.models?.unpricedPreparationModel();
+    if (unpriced) return `${unpriced} has no price, so the preparation allowance cannot bound it`;
+  };
   const preparationPause = async () => {
     const prefs = await speechPreferences.get();
     if (prefs.proactivePaused) return 'automatic preparation is paused';
     if (isQuietTime(prefs)) return 'it is quiet hours';
-    if ((await ledger.preparationLimit()).reached)
-      return 'the monthly preparation allowance is reached';
+    return preparationBlocked();
   };
   const integrations = await createIntegrations(pool, {
     localFiles,
@@ -1840,29 +1851,32 @@ async function initializeApplication(
       }
     | undefined;
   const feedbackSecrets = [ownerId, ...secrets];
-  diagnostics.log = await createFeedbackLog({
+  const sanitizeDiagnostics = async (value: unknown) => {
+    const profile = await (feedbackProfileRead ??= ownerProfile().finally(() => {
+      feedbackProfileRead = undefined;
+    }));
+    for (let index = feedbackSecrets.length - 1; index < secrets.length; index++)
+      feedbackSecrets.push(secrets[index]);
+    if (
+      !feedbackRedaction ||
+      feedbackRedaction.profile.region !== profile.region ||
+      feedbackRedaction.profile.names.length !== profile.names.length ||
+      feedbackRedaction.profile.names.some((name, index) => name !== profile.names[index])
+    )
+      feedbackRedaction = {
+        profile,
+        redact: createFeedbackRedactor({ secrets: feedbackSecrets, profile }),
+      };
+    const { redact } = feedbackRedaction;
+    if (!redact.isReady()) throw new Error('Diagnostic redaction unavailable.');
+    return redact.value(value);
+  };
+  diagnostics.log = await createFeedbackLog({ dataRoot, ownerId, sanitize: sanitizeDiagnostics });
+  diagnostics.failures = await createFeedbackLog({
     dataRoot,
     ownerId,
-    sanitize: async (value) => {
-      const profile = await (feedbackProfileRead ??= ownerProfile().finally(() => {
-        feedbackProfileRead = undefined;
-      }));
-      for (let index = feedbackSecrets.length - 1; index < secrets.length; index++)
-        feedbackSecrets.push(secrets[index]);
-      if (
-        !feedbackRedaction ||
-        feedbackRedaction.profile.region !== profile.region ||
-        feedbackRedaction.profile.names.length !== profile.names.length ||
-        feedbackRedaction.profile.names.some((name, index) => name !== profile.names[index])
-      )
-        feedbackRedaction = {
-          profile,
-          redact: createFeedbackRedactor({ secrets: feedbackSecrets, profile }),
-        };
-      const { redact } = feedbackRedaction;
-      if (!redact.isReady()) throw new Error('Diagnostic redaction unavailable.');
-      return redact.value(value);
-    },
+    name: 'failures',
+    sanitize: sanitizeDiagnostics,
   });
   adapters.traces?.configure({
     enabled: (await localAccounts.read(ownerId)).traces,
@@ -1972,7 +1986,7 @@ async function initializeApplication(
     curator: adapters.classificationCurator && ledger.curator(adapters.classificationCurator),
     analytics: captureAnalytics,
     modelAvailable: async () =>
-      !(await ledger.preparationLimit()).reached &&
+      !(await preparationBlocked()) &&
       (adapters.models
         ? await adapters.models.automaticRequestsAllowed({ kind: 'background' }, true)
         : adapters.model.configured),
@@ -2806,6 +2820,9 @@ async function initializeApplication(
     secrets,
     profile: ownerProfile,
     logs: () => diagnostics.log!.snapshot(),
+    failures: () => diagnostics.failures!.snapshot(),
+    dataRoot,
+    trustModel: adapters.trustModel ?? 'selected',
     context: await feedbackContext({ environment: process.env }),
     get provider() {
       return adapters.model.provider;
@@ -2824,11 +2841,12 @@ async function initializeApplication(
       submit: async (input) => ({ submissionId: input.submissionId, status: 'rejected' }),
       status: async (submissionId) => ({ submissionId, status: 'rejected' }),
     },
-    buildReport: (activity, errors, errorsAvailable) =>
+    buildReport: (activity, errors, errorsAvailable, client) =>
       buildFeedbackReport({
         ...feedbackReportOptions,
         errors,
         errorsAvailable,
+        client,
         activity: [...feedbackActivity.snapshot(), ...activity].sort((a, b) => b.ageMs - a.ageMs),
       }),
     analytics: captureAnalytics,
@@ -3078,6 +3096,7 @@ async function initializeApplication(
       () => analytics.shutdown(),
       () => adapters.telemetry?.shutdown(),
       () => diagnostics.log?.close(),
+      () => diagnostics.failures?.close(),
     ]) {
       try {
         await close();

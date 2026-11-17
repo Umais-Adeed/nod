@@ -1,3 +1,4 @@
+import { logFailure } from '../../ports/failure-log.ts';
 import {
   spawn,
   type ChildProcessWithoutNullStreams,
@@ -419,6 +420,7 @@ function runSupervisedCommand(options: {
     const unavailable = (reason: string) => {
       if (settled) return;
       settled = true;
+      logFailure('workspace_command_failed', new Error(reason));
       cleanup();
       child.stdin.destroy();
       child.kill('SIGKILL');
