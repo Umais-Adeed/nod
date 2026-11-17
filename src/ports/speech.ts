@@ -1,4 +1,4 @@
-import type { SpeechVoice } from '../shared/speech.ts';
+import type { LocalTranscriptionModel, SpeechVoice } from '../shared/speech.ts';
 
 export class SpeechProviderError extends Error {
   readonly statusCode = 400;
@@ -46,5 +46,10 @@ export interface LocalSpeechControls {
     state: 'not_downloaded' | 'downloading' | 'ready' | 'failed';
     progress?: number;
   };
+  transcriptionModel(): {
+    model: LocalTranscriptionModel;
+    choices: { id: LocalTranscriptionModel; name: string; description: string; bytes: number }[];
+  };
+  selectTranscriptionModel(model: LocalTranscriptionModel): Promise<void>;
   close(): Promise<void>;
 }

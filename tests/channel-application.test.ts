@@ -273,6 +273,8 @@ test('speech previews reject unavailable voices, serialize generation and releas
           },
           status: () => ({ state: ready ? 'ready' : 'not_downloaded' }),
           transcriptionStatus: () => ({ state: ready ? 'ready' : 'not_downloaded' }),
+          transcriptionModel: () => ({ model: 'whisper', choices: [] }),
+          selectTranscriptionModel: async () => {},
           close: async () => {},
         },
       });
@@ -334,6 +336,8 @@ test('input preparation reuses cloud transcription and preserves an explicit loc
       },
       status: () => ({ state: 'not_downloaded' }),
       transcriptionStatus: () => ({ state: inputReady ? 'ready' : 'not_downloaded' }),
+      transcriptionModel: () => ({ model: 'whisper', choices: [] }),
+      selectTranscriptionModel: async () => {},
       close: async () => {},
     },
     inputFormat: (selected) => (selected?.startsWith('local:') ? 'wav' : undefined),
