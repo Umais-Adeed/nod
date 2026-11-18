@@ -255,7 +255,7 @@ export function loadAppCatalog(directory = fileURLToPath(new URL('../apps/', imp
             `App ${entry.name}: fixed apps need one MCP server; owner-supplied endpoints must omit mcp.json.`,
           );
         const server = !instance ? connection.server : '';
-        const selected = mcp.mcpServers[server];
+        const selected = Object.hasOwn(mcp.mcpServers, server) ? mcp.mcpServers[server] : undefined;
         if (!selected)
           throw new Error(`App ${entry.name}: mcp.json has no server named ${server}.`);
         if (selected.type !== 'streamable-http')
