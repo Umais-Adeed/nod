@@ -164,7 +164,15 @@ export const appConnectionSchema = z.union([
         .record(appEnvironmentNameSchema, text(100))
         .refine((value) => Object.keys(value).length >= 1 && Object.keys(value).length <= 16)
         .meta({ minProperties: 1, maxProperties: 16 }),
-      publicEnvironment: z.array(appEnvironmentNameSchema).max(15).optional(),
+      publicEnvironment: z
+        .array(
+          z
+            .string()
+            .max(appEnvironmentNameMaxLength)
+            .regex(/^[A-Z][A-Z0-9_]*(?:_ID|_SID|USERNAME|USER|EMAIL)$/),
+        )
+        .max(15)
+        .optional(),
     })
     .refine(
       (value) =>

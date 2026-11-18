@@ -104,7 +104,7 @@ In `io.n8n.nod/app.json`, set:
 }
 ```
 
-The environment object maps provider variable names to user-facing labels. It contains no values. The private setup form asks for those fields. Values can be short account identifiers or long tokens. Nod removes every value from command output and setup errors unless `publicEnvironment` names its setting. List only settings that grant no access on their own, such as an account ID, so a short ID doesn't corrupt the output. At least one setting stays secret. A connection Nod proposes outside the catalog has no public settings.
+The environment object maps provider variable names to user-facing labels. It contains no values. The private setup form asks for those fields. Values can be short account identifiers or long tokens. Nod removes every value from command output and setup errors unless `publicEnvironment` names its setting. List only identifier settings that grant no access on their own, such as an account ID, so a short ID doesn't corrupt the output. Their names end in `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL`. At least one setting stays secret. A connection Nod proposes outside the catalog has no public settings.
 
 Names use uppercase letters, digits, and underscores. They must end in `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `_ID`, `_SID`, `USERNAME`, `USER`, `EMAIL`, or `URL`. Runtime control variables such as `LD_PRELOAD` are rejected.
 

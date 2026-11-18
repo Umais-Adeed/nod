@@ -439,6 +439,7 @@ test('API and CLI app scaffolds pass real transport and process contracts and re
           { ...definition.connection, command: 'PyThOn3' },
           { ...definition.connection, environment: {} },
           { ...definition.connection, environment: { LD_PRELOAD: 'Library' } },
+          { ...definition.connection, publicEnvironment: ['SAMPLE_TOKEN'] },
           { ...definition.connection, authentication: ['bearer'] },
         ]
       : [
@@ -450,6 +451,24 @@ test('API and CLI app scaffolds pass real transport and process contracts and re
       const invalid = { ...definition, connection };
       assert.equal(appDefinitionSchema.safeParse(invalid).success, false);
       assert.equal(editor.Check(invalid), false);
+    }
+    if (fixture.slug === 'sample-cli') {
+      const listed = (change: object) => ({
+        ...definition,
+        connection: { ...definition.connection, ...change },
+      });
+      assert(
+        appDefinitionSchema.safeParse(listed({ publicEnvironment: ['SAMPLE_ACCOUNT_ID'] })).success,
+      );
+      for (const change of [
+        { publicEnvironment: ['SAMPLE_ACCOUNT_ID', 'SAMPLE_ACCOUNT_ID'] },
+        { publicEnvironment: ['SAMPLE_OTHER_ID'] },
+        {
+          environment: { SAMPLE_ACCOUNT_ID: 'Account ID' },
+          publicEnvironment: ['SAMPLE_ACCOUNT_ID'],
+        },
+      ])
+        assert.equal(appDefinitionSchema.safeParse(listed(change)).success, false);
     }
     const saved = JSON.stringify(definition);
     for (const connection of fixture.options.type === 'cli'
