@@ -633,6 +633,24 @@ test('an uncertain command is stopped once and the workspace keeps working', asy
   }
 });
 
+test('a command stopped at a limit names that limit and its value', async () => {
+  const docker = fakeDocker(async () => ({ code: 0 }));
+  try {
+    const cases = [
+      ['timeout', 'Workspace command ran longer than its 90-second limit.'],
+      ['install', 'The connected CLI install ran longer than its 600-second limit.'],
+      ['limit', 'Workspace command output passed its 16 MB limit.'],
+    ] as const;
+    for (const [index, [reason, message]] of cases.entries()) {
+      const run = docker.session.exec(reason, { timeoutMs: 90_000 });
+      docker.exit(index, -15, reason);
+      await assert.rejects(run, { message });
+    }
+  } finally {
+    await docker.workspace.dispose();
+  }
+});
+
 test('the workspace stays fenced when a live process cannot be read', async () => {
   const proc = await mkdtemp(join(tmpdir(), 'nod-proc-'));
   await mkdir(join(proc, '1'));
