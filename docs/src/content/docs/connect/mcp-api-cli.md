@@ -45,11 +45,11 @@ A failed tool request keeps the server's status and reason. Nod does not retry i
 
 Ask Nod to connect a service it can't find in the app catalog. Nod proposes a way in, called an access path, and sends you a link to a private setup page. There, you paste a token or sign in. The model never sees the token.
 
-| Access path | What Nod calls                                                 | How it signs in                       |
-| ----------- | -------------------------------------------------------------- | ------------------------------------- |
-| MCP server  | Tools on a public HTTPS MCP server, or a private one you enter | A token in a header, or OAuth sign-in |
-| HTTP API    | A method and path on the API                                   | A token in a header                   |
-| CLI         | A command with arguments                                       | Tokens in environment variables       |
+| Access path | What Nod calls                                                 | How it signs in                                    |
+| ----------- | -------------------------------------------------------------- | -------------------------------------------------- |
+| MCP server  | Tools on a public HTTPS MCP server, or a private one you enter | A token in a header, or OAuth sign-in              |
+| HTTP API    | A method and path on the API                                   | A token in a header, or OAuth sign-in              |
+| CLI         | A command with arguments                                       | Tokens and other settings in environment variables |
 
 Nod keeps the token encrypted in Vault, and the server adds it to each call. Results and errors remove plaintext, JSON-escaped and URL- or form-encoded representations of the token. A returned file containing any of those representations is withheld.
 
