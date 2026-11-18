@@ -1,3 +1,5 @@
+import * as dns from 'node:dns';
+import { constants } from 'node:os';
 import { parse } from 'tldts';
 import { createRedactor, redactSecretText } from './redaction.ts';
 import { createPersonalDataRedactor, personalKey, type PersonalProfile } from './personal-data.ts';
@@ -19,28 +21,54 @@ const appFile =
   /^(?:src\/(?:server|providers|ports|shared|web|runtime)|dist|desktop\/main|node_modules)\/[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 const className = /^[A-Za-z][A-Za-z0-9_$]{0,80}$/;
 const hostPattern =
-  /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?(?::\d{1,5})?/gi;
-const linkTail = /[/?#][^\s<>"']*/y;
+  /(?:\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?|\[ip\]|\blocalhost\b)(?::\d{1,5})?/gi;
+const linkTail = /[/?#][^\r\n]*/y;
+const errorNames = new Set<string>([
+  ...Object.keys(constants.errno),
+  ...Object.values<unknown>(dns).filter((code): code is string => typeof code === 'string'),
+]);
+const reasonPattern =
+  /\b(?:(EAI_[A-Z]{2,12}|(?:UND_)?ERR_[A-Z0-9]{1,30}(?:_[A-Z0-9]{1,30}){0,8}|E[A-Z0-9]{2,15})|(?:HTTP(?:\/[0-9.]{1,3})?|[Ss]tatus(?:[ _-]?[Cc]ode)?)[ :=]{0,3}([1-5]\d\d))\b/g;
+const utf8 = new TextDecoder();
+
+function reasons(removed: string) {
+  const found = new Set<string>();
+  for (const [, code, status] of removed.matchAll(reasonPattern)) {
+    if (status) found.add(`HTTP ${status}`);
+    else if (/^(?:EAI|ERR|UND)_/.test(code) || errorNames.has(code)) found.add(code);
+    if (found.size === 4) break;
+  }
+  return found.size ? ` (${[...found].join(', ')})` : '';
+}
+
+function decode(encoded: string) {
+  return encoded.replace(/(?:%[0-9a-f]{2})+/gi, (run) =>
+    utf8.decode(Uint8Array.from(run.slice(1).split('%'), (byte) => parseInt(byte, 16))),
+  );
+}
 
 function hosts(text: string, encodedToken = false) {
   let result = '';
   let last = 0;
   hostPattern.lastIndex = 0;
   for (let match = hostPattern.exec(text); match; match = hostPattern.exec(text)) {
-    const domain = parse(match[1], { allowPrivateDomains: true });
-    if (
-      !domain.isIcann &&
-      !domain.isPrivate &&
-      !/\.(?:internal|local|localhost|test|invalid)$/i.test(match[1])
-    )
-      continue;
+    if (match[1]) {
+      const domain = parse(match[1], { allowPrivateDomains: true });
+      if (
+        !domain.isIcann &&
+        !domain.isPrivate &&
+        !/\.(?:internal|local|localhost|test|invalid)$/i.test(match[1])
+      )
+        continue;
+    }
     linkTail.lastIndex = hostPattern.lastIndex;
     const tail = linkTail.exec(text)?.[0] ?? '';
     if (encodedToken) {
       if (tail) return '[url]';
       continue;
     }
-    result += text.slice(last, match.index) + (tail ? '[url]' : '[host]');
+    if (!match[1] && !tail) continue;
+    result += text.slice(last, match.index) + (tail ? '[url]' + reasons(tail) : '[host]');
     last = hostPattern.lastIndex += tail.length;
   }
   return result + text.slice(last);
@@ -115,13 +143,9 @@ export function createFeedbackRedactor(options: { secrets: string[]; profile: Pe
   }
 
   function text(value: string, stack = false) {
-    const decoded = value.replace(/[^\s<>"']*%[0-9a-f]{2}[^\s<>"']*/gi, (encoded) => {
-      try {
-        return hosts(decodeURIComponent(encoded), true);
-      } catch {
-        return encoded;
-      }
-    });
+    const decoded = value.replace(/[^\s<>"']*%[0-9a-f]{2}[^\s<>"']*/gi, (encoded) =>
+      hosts(decode(encoded), true),
+    );
     let safe = personal(decoded);
     safe = redactSecretText(secretPattern ? safe.replace(secretPattern, hidden) : safe);
     const frames: string[] = [];
@@ -150,7 +174,7 @@ export function createFeedbackRedactor(options: { secrets: string[]; profile: Pe
         );
     }
     const location = (value: string, marker: string) =>
-      marker + (stack ? (value.match(/:\d+:\d+[),;]*$/)?.[0] ?? '') : '');
+      marker + (stack ? (value.match(/:\d+:\d+[),;]*$/)?.[0] ?? '') : '') + reasons(value);
     const masked = safe
       .replace(/\bdata:[^\s"'<>]+/gi, '[binary omitted]')
       .replace(/(["'])(?:https?|wss?|ftp|file):\/\/[^\r\n]*?\1/gi, '[url]')

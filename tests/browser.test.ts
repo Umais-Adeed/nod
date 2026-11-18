@@ -2869,6 +2869,11 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Open example%2Ecom%2FReport%09synthetic-tab-record.pdf failed with HTTP 414.',
     'Open example.com:8443/private?label=Case%20synthetic-query-record failed with HTTP 415.',
     'Open example.com./private#Case%0Asynthetic-fragment-record failed with HTTP 416.',
+    'Open example.com/Synthetic Spaced/Raw Return.pdf failed with HTTP 417.',
+    'Open example%2Ecom%2FSynthetic-malformed%20Escape%E0 failed.',
+    'Open 192.168.1.20:8080/synthetic-ip-path failed.',
+    'Open localhost:5678/synthetic-localhost-path failed.',
+    'request to http://localhost:5678/Synthetic Spaced Folder/mcp failed, reason: connect ECONNREFUSED 127.0.0.1:5678, HTTP/1.1 503',
     { type: 'image', data: 'synthetic-private-image' },
     {
       content: [
@@ -2929,6 +2934,12 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'synthetic-tab-record',
     'synthetic-query-record',
     'synthetic-fragment-record',
+    'Raw Return',
+    'Synthetic-malformed',
+    'Escape',
+    'synthetic-ip-path',
+    'synthetic-localhost-path',
+    'Spaced Folder',
     'fixture',
     'marta.vidal',
     '00000000-1111',
@@ -2964,7 +2975,9 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'HTTP 414',
     'HTTP 415',
     'HTTP 416',
-    'Book a slot at [url] please',
+    'Book a slot at [url]',
+    'Open [url] (HTTP 417)',
+    'request to [url] (ECONNREFUSED, HTTP 503)',
   ])
     assert.ok(encoded.includes(useful), useful);
   const { timeZoneRegion } = await import('../src/shared/date-locale.ts');
@@ -2977,7 +2990,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
   const chained = createFeedbackRedactor({ secrets: [], profile: { names: [] } }).text(
     `${'a.zz/'.repeat(6000)} then example.com:8443 and example.com./synthetic-chained?q=1 at example.com.`,
   );
-  assert.ok(chained.endsWith(' then [host] and [url] at [host].'), chained.slice(-60));
+  assert.ok(chained.endsWith(' then [host] and [url]'), chained.slice(-60));
   const concealedType = createFeedbackRedactor({ secrets: ['image'], profile: { names: [] } });
   assert.ok(
     !JSON.stringify(concealedType.value({ type: 'image', data: 'c3ludGhldGljIGltYWdl' })).includes(
