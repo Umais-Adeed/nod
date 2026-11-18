@@ -61,7 +61,7 @@ A CLI path declares where to install the tool from:
 
 It also names the environment variables the tool reads its credentials from, such as `GITHUB_TOKEN`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Each name must end in `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `URL`, `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL`, so it can't be a variable that loads code, such as `LD_PRELOAD`. A tool with several variables is its own connection.
 
-Results and errors remove the value of each variable as they do a token, except identifiers: values of names ending in `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL` stay visible, so a short account ID doesn't corrupt the output.
+Results and errors remove the value of each variable as they do a token, except identifiers: values of names ending in `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL` stay visible, so a short account ID doesn't corrupt the output. A value that an API or MCP path in the same connection also uses as its token is always removed.
 
 The setup page shows the source and one field per variable, so you can check it before you paste anything. A command runs for up to 59 minutes unless Nod asks for longer.
 

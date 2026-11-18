@@ -103,7 +103,7 @@ In `io.n8n.nod/app.json`, set:
 }
 ```
 
-The environment object maps provider variable names to user-facing labels. It contains no values. The private setup form asks for those fields. Values can be short account identifiers or long tokens. Nod removes every value from command output and setup errors except those of identifier names, ending in `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL`, so give every secret a credential name.
+The environment object maps provider variable names to user-facing labels. It contains no values. The private setup form asks for those fields. Values can be short account identifiers or long tokens. Nod removes every value from command output and setup errors except those of identifier names, ending in `_ID`, `_SID`, `USERNAME`, `USER` or `EMAIL`, so give every secret a credential name. A value that an API or MCP path also uses as its token is always removed.
 
 Names use uppercase letters, digits, and underscores. They must end in `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `_ID`, `_SID`, `USERNAME`, `USER`, `EMAIL`, or `URL`. Runtime control variables such as `LD_PRELOAD` are rejected.
 
