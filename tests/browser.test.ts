@@ -2964,9 +2964,9 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
   assert.ok(!local.includes('555-0134'), local);
   assert.ok(local.includes('Call the clinic'), local);
   const chained = createFeedbackRedactor({ secrets: [], profile: { names: [] } }).text(
-    `${'a.zz/'.repeat(6000)} then example.com:8443 and example.com/synthetic-chained`,
+    `${'a.zz/'.repeat(6000)} then example.com:8443 and example.com./synthetic-chained?q=1 at example.com.`,
   );
-  assert.ok(chained.endsWith(' then [host] and [url]'), chained.slice(-60));
+  assert.ok(chained.endsWith(' then [host] and [url] at [host].'), chained.slice(-60));
   const concealedType = createFeedbackRedactor({ secrets: ['image'], profile: { names: [] } });
   assert.ok(
     !JSON.stringify(concealedType.value({ type: 'image', data: 'c3ludGhldGljIGltYWdl' })).includes(

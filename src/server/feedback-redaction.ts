@@ -18,7 +18,8 @@ const opening = /\{(?=\s*["}])|\[(?=\s*(?:[\[\]{"\d-]|true\b|false\b|null\b))/g;
 const appFile =
   /^(?:src\/(?:server|providers|ports|shared|web|runtime)|dist|desktop\/main|node_modules)\/[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 const className = /^[A-Za-z][A-Za-z0-9_$]{0,80}$/;
-const hostPattern = /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?::\d{1,5})?/gi;
+const hostPattern =
+  /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?(?::\d{1,5})?/gi;
 const linkTail = /[/?#][^\s<>"']*/y;
 
 function hosts(text: string) {
