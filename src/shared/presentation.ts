@@ -386,6 +386,14 @@ export const presentationInputSchema = z
   .pipe(presentationSchema);
 
 export type Presentation = z.infer<typeof presentationSchema>;
+export const previewPresentationTypes: readonly Presentation['type'][] = [
+  'flights',
+  'map',
+  'seats',
+  'booking',
+  'chart',
+  'diagram',
+];
 
 export function presentationImages(
   value: Presentation,

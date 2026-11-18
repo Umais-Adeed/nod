@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { FileActions, fileDrag, prepareFile } from './file-actions';
 import type { Artifact, Message } from '../../shared/contracts';
-import { presentationSchema } from '../../shared/presentation';
+import { presentationSchema, previewPresentationTypes } from '../../shared/presentation';
 import { attachmentKind, fileSize, fileType } from '../lib/attachment-kind';
 import { FileGlyph } from './attachment-glyph';
 import { AudioPlayer } from './audio-player';
@@ -254,9 +254,7 @@ export function conversationFiles(
     const { all } = messageFiles(message.attachments);
     const parsed = presentationSchema.safeParse(message.presentation);
     const presentation: ImagePreview[] =
-      message.id &&
-      parsed.success &&
-      ['flights', 'map', 'seats', 'booking', 'chart', 'diagram'].includes(parsed.data.type)
+      message.id && parsed.success && previewPresentationTypes.includes(parsed.data.type)
         ? [
             {
               id: `presentation:${message.id}`,
