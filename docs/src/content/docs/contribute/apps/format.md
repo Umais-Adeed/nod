@@ -84,7 +84,7 @@ Select one named server from `mcp.json`:
 }
 ```
 
-The `scopes` field is optional and is valid only with `oauth2`. It holds up to 30 scopes, and together they can use at most 500 characters when joined with spaces. Editors don't check the joined length; `pnpm check:apps` does. Fixed connections select one authentication method: `oauth2`, `bearer`, or `x-api-key`. Nod sends API keys in `X-API-Key`.
+The `scopes` field is optional and is valid only with `oauth2`. Its limits are under [OAuth scopes](#oauth-scopes). Fixed connections select one authentication method: `oauth2`, `bearer`, or `x-api-key`. Nod sends API keys in `X-API-Key`.
 
 `mcp.json` must target the matching Agent Plugins schema version. It must contain exactly one server with `type: "streamable-http"`. Its address must be public HTTPS without credentials, a query, or a fragment. DNS and network checks also run when Nod connects.
 
@@ -112,6 +112,10 @@ Nod applies its address policy outside the manifest. Only n8n has the existing l
 ## HTTP API and CLI bindings
 
 Use `type: "http"` with a public HTTPS `url`. Select one authentication method: `oauth2`, `bearer`, or `x-api-key`. Only API-key connections accept `apiKeyHeader`. Only OAuth connections accept `scopes`, `oauth`, and `clientIdRequired`.
+
+### OAuth scopes
+
+Fixed MCP and HTTP API connections that use `oauth2` share the same `scopes` limits: up to 30 scopes of up to 100 characters each, and at most 500 characters when joined with spaces. Editors don't check the joined length; `pnpm check:apps` does.
 
 Use `type: "cli"` with `command`, a pinned `source`, `authentication: ["env"]`, and an `environment` label map. The map contains one to 16 fields. Names have at most 64 characters. The CLI fixture supplies the read check and its timeout.
 

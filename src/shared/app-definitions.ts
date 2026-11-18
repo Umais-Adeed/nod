@@ -117,12 +117,13 @@ export const appOAuthMetadataSchema = z.strictObject({
 });
 export type AppOAuthMetadata = z.output<typeof appOAuthMetadataSchema>;
 
+export const appScopeMaxLength = 500;
 const oauthScopes = z
   .array(text(100))
   .max(30)
   .refine(
-    (scopes) => scopes.join(' ').length <= 500,
-    'Keep the scopes to 500 characters or fewer when joined with spaces.',
+    (scopes) => scopes.join(' ').length <= appScopeMaxLength,
+    `Keep the scopes to ${appScopeMaxLength} characters or fewer when joined with spaces.`,
   )
   .optional();
 
