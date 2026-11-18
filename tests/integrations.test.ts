@@ -1048,6 +1048,9 @@ test('published app schemas reject unsupported definitions with the runtime vali
       value.displayName = 'Fixture\u202eApp';
     },
     (value: any) => {
+      value.displayName = 'Fixture\u2028App';
+    },
+    (value: any) => {
       value.requirements = ['   '];
     },
     (value: any) => {
@@ -9949,7 +9952,12 @@ test(
         }),
         { name: 'ZodError' },
       );
-      for (const name of ['Fixture\ncloud', 'Fixture\u202ecloud', 'Fixture\u0007cloud'])
+      for (const name of [
+        'Fixture\ncloud',
+        'Fixture\u202ecloud',
+        'Fixture\u0007cloud',
+        'Fixture\u2029cloud',
+      ])
         await assert.rejects(discovered.propose({ service: 'fixture-cloud', name, paths: [cli] }), {
           name: 'ZodError',
         });

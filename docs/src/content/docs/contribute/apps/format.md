@@ -67,7 +67,7 @@ The [app schema](https://nod.n8n.io/docs/schemas/apps/v1/app.schema.json) and [f
 
 Unknown fields and unsupported connection combinations fail validation. Other client extension namespaces keep their own meaning. A profile version change requires an explicit migration.
 
-Text fields must contain visible text. Do not start or end them with whitespace. The display name can't contain control or format characters, such as line breaks or text direction marks.
+Text fields must contain visible text. Do not start or end them with whitespace. The display name can't contain control or format characters or line separators, such as line breaks or text direction marks.
 
 The published schema files are generated. `pnpm check:apps` fails if they differ from their TypeScript source. Maintainers update them with `pnpm generate:app-schemas` when the profile changes.
 
