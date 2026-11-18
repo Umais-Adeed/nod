@@ -86,7 +86,7 @@ Select one named server from `mcp.json`:
 
 The `scopes` field is optional and is valid only with `oauth2`. Fixed connections select one authentication method: `oauth2`, `bearer`, or `x-api-key`. Nod sends API keys in `X-API-Key`.
 
-`mcp.json` must target the matching Agent Plugins schema version. It must contain exactly one server with `type: "streamable-http"`. Its address must be public HTTPS without credentials, a query, or a fragment. DNS and network checks also run when Nod connects.
+`mcp.json` must target the matching Agent Plugins schema version. It must contain exactly one server, named as in the connection's `server` field, with `type: "streamable-http"`. Its address must be public HTTPS without credentials, a query, or a fragment. DNS and network checks also run when Nod connects.
 
 Static headers, stdio servers, and legacy SSE servers are outside the current Nod app profile. A schema-valid Agent Plugin can still use features Nod does not support.
 

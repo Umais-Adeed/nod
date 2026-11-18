@@ -197,7 +197,7 @@ test('app folders reject escaped paths, incomplete contracts, and unsupported se
       (value) => {
         value.mcpServers.linear = { type: 'stdio', command: 'node' };
       },
-      /streamable-http/,
+      /selected server must use streamable-http/,
     ],
     [
       'server',
@@ -205,7 +205,7 @@ test('app folders reject escaped paths, incomplete contracts, and unsupported se
       (value) => {
         value.connection.server = 'missing';
       },
-      /selected server/,
+      /mcp\.json has no server named missing\./,
     ],
     [
       'placeholder',
