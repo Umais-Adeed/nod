@@ -320,7 +320,7 @@ export async function registerFeedback(
         id,
       ])
     ).rows[0];
-    return row && !rejectionClaim(row) ? receipt(row) : null;
+    return row && row.status !== 'rejected' ? receipt(row) : null;
   };
   const sendDraft = async (
     id: string,
@@ -331,6 +331,10 @@ export async function registerFeedback(
     if (!draft) throw fail('This bug report is no longer available.', 404);
     const sent = await sentReceipt(id);
     if (sent) return sent;
+    await options.pool.query(
+      `DELETE FROM feedback_submissions WHERE owner_id=$1 AND id=$2 AND status='rejected'`,
+      [options.ownerId, id],
+    );
     return deliver(
       {
         submissionId: id,
@@ -360,7 +364,8 @@ export async function registerFeedback(
           ? `SELECT id,summary FROM feedback_drafts WHERE owner_id=$1 AND thread_id=$2 AND id=$3`
           : `SELECT d.id,d.summary FROM feedback_drafts d
              WHERE d.owner_id=$1 AND d.thread_id=$2 AND d.created_at > now() - interval '1 day'
-               AND NOT EXISTS (SELECT 1 FROM feedback_submissions s WHERE s.owner_id=$1 AND s.id=d.id)
+               AND NOT EXISTS (SELECT 1 FROM feedback_submissions s
+                 WHERE s.owner_id=$1 AND s.id=d.id AND s.status<>'rejected')
              ORDER BY d.created_at DESC LIMIT 1`,
         replied ? [options.ownerId, threadId, replied] : [options.ownerId, threadId],
       )

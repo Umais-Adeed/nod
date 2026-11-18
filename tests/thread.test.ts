@@ -11397,7 +11397,7 @@ test(
 );
 
 test(
-  'bug report drafts send their stored summary once and only for their owner',
+  'bug report drafts send their stored summary once, after any rejected attempt, and only for their owner',
   { skip: !process.env.TEST_DATABASE_URL, timeout: 30_000 },
   async (t) => {
     const f = await feedbackFixture(t);
@@ -11423,11 +11423,18 @@ test(
     );
     assert.equal((await other.app.inject(send)).statusCode, 404);
     assert.equal(f.state.envelopes.length, 0);
+    f.state.receiptStatus = 'rejected';
+    assert.equal((await owner.app.inject(send)).json().status, 'rejected');
+    assert.equal(
+      (await owner.app.inject({ method: 'GET', url: `/api/feedback/drafts/${id}` })).json().receipt,
+      null,
+    );
+    f.state.receiptStatus = 'submitted';
     assert.equal((await owner.app.inject(send)).json().status, 'submitted');
     assert.equal((await owner.app.inject(send)).json().status, 'submitted');
-    assert.equal(f.state.envelopes.length, 1);
-    assert.equal(f.state.envelopes[0]!.submissionId, id);
-    assert.equal(f.state.envelopes[0]!.feedback, 'Synthetic draft summary.');
+    assert.equal(f.state.envelopes.length, 2);
+    assert.equal(f.state.envelopes[1]!.submissionId, id);
+    assert.equal(f.state.envelopes[1]!.feedback, 'Synthetic draft summary.');
     assert.equal(
       (await owner.app.inject({ method: 'GET', url: `/api/feedback/drafts/${id}` })).json().receipt
         .status,
