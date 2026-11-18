@@ -11470,6 +11470,42 @@ test(
       'submitted',
     );
     assert.equal(f.state.envelopes.length, 4);
+    await f.pool.query(
+      "UPDATE feedback_submissions SET created_at=now()-interval '10 minutes' WHERE owner_id=$1 AND id=$2",
+      [owner.ownerId, uncertain],
+    );
+    const held: Array<() => void> = [];
+    let arrived = () => {};
+    const holding = (count: number) =>
+      new Promise<void>((done) => {
+        arrived = () => held.length >= count && done();
+        arrived();
+      });
+    f.state.beforeDeliver = () =>
+      held.length < 3
+        ? new Promise<void>((done) => {
+            held.push(done);
+            arrived();
+          })
+        : Promise.resolve();
+    f.state.receiptStatus = 'rejected';
+    const check = () => owner.app.inject({ method: 'GET', url: `/api/feedback/${uncertain}` });
+    const early = check();
+    await holding(1);
+    const late = check();
+    await holding(2);
+    held[0]!();
+    assert.equal((await early).json().status, 'rejected');
+    const retry = owner.app.inject(resend);
+    await holding(3);
+    held[1]!();
+    assert.equal((await late).json().status, 'unknown');
+    f.state.receiptStatus = 'submitted';
+    assert.equal((await owner.app.inject(resend)).json().status, 'unknown');
+    assert.equal(f.state.envelopes.length, 5);
+    held[2]!();
+    assert.equal((await retry).json().status, 'submitted');
+    f.state.beforeDeliver = undefined;
   },
 );
 
