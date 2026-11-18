@@ -300,6 +300,14 @@ test('app scaffolding refuses replacement and requires contributors to complete 
     JSON.stringify(bundledApps.get('linear')!.contract),
   );
   await checkAppContract(loadAppCatalog(directory).get('synthetic-app')!);
+  app.connection.scopes = Array.from(
+    { length: 11 },
+    (_, index) => `https://www.googleapis.com/auth/synthetic${index}.readonly`,
+  );
+  await writeFile(appPath, JSON.stringify(app));
+  assert.throws(() => loadAppCatalog(directory), {
+    message: /^App synthetic-app: invalid app\.json: [\s\S]*500 characters/,
+  });
 });
 
 const communityAccessCases: Array<{
