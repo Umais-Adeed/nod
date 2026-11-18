@@ -208,7 +208,7 @@ function assembled(checked: Checked, fallback: PreparedSuggestions, sources: rea
   let replaced = 0;
   const tasks = fallback.tasks.map((spare, index) => {
     const pick = checked.picks[index];
-    if (pick) return pick;
+    if (pick) return { ...pick, origin: 'learned' as const };
     replaced++;
     const chosen =
       [spare, ...spares].find(
@@ -254,10 +254,10 @@ const commonTasks: Task[] = [
   { kind: 'now', title: 'Find a cheaper plan for a bill I pay', source: 'web' },
 ];
 
-function withCommonTasks(tasks: Task[], learned: boolean) {
+function withCommonTasks(tasks: Task[]) {
   const seen = new Set(tasks.map((task) => task.title.toLowerCase()));
   return [
-    ...tasks.map((task) => ({ ...task, ...(learned ? { origin: 'learned' as const } : {}) })),
+    ...tasks.map((task) => ({ ...task, origin: task.origin ?? ('fixed' as const) })),
     ...commonTasks
       .filter((task) => !seen.has(task.title.toLowerCase()))
       .slice(0, 3)
@@ -637,7 +637,7 @@ export function createOnboardingSuggestions(options: {
           [owner],
         );
         if (!claimed.rowCount) return;
-        const tasks = withCommonTasks(prepared.tasks, prepared.accounts.length > 0).map((task) => ({
+        const tasks = withCommonTasks(prepared.tasks).map((task) => ({
           id: randomUUID(),
           ...task,
         }));
