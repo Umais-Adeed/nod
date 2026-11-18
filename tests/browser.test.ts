@@ -2865,6 +2865,10 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Profile www.example.com/in/synthetic-profile?ref=private-ref#private-anchor failed.',
     'Redirect via unlisted.notatld/next?to=example.com/synthetic-hidden failed.',
     'Mirror downloads.example.com:8443/synthetic-mirror?key=synthetic-query failed.',
+    'Open example.com/Private%20Records/Tax%20Return.pdf failed with HTTP 413.',
+    'Open example%2Ecom%2FReport%09synthetic-tab-record.pdf failed with HTTP 414.',
+    'Open example.com:8443/private?label=Case%20synthetic-query-record failed with HTTP 415.',
+    'Open example.com./private#Case%0Asynthetic-fragment-record failed with HTTP 416.',
     { type: 'image', data: 'synthetic-private-image' },
     {
       content: [
@@ -2922,6 +2926,9 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'synthetic-hidden',
     'synthetic-mirror',
     'synthetic-query',
+    'synthetic-tab-record',
+    'synthetic-query-record',
+    'synthetic-fragment-record',
     'fixture',
     'marta.vidal',
     '00000000-1111',
@@ -2953,6 +2960,10 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'HTTP 410',
     'HTTP 411',
     'HTTP 412',
+    'HTTP 413',
+    'HTTP 414',
+    'HTTP 415',
+    'HTTP 416',
     'Book a slot at [url] please',
   ])
     assert.ok(encoded.includes(useful), useful);

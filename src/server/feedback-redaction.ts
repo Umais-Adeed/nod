@@ -22,7 +22,7 @@ const hostPattern =
   /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?(?::\d{1,5})?/gi;
 const linkTail = /[/?#][^\s<>"']*/y;
 
-function hosts(text: string) {
+function hosts(text: string, encodedToken = false) {
   let result = '';
   let last = 0;
   hostPattern.lastIndex = 0;
@@ -36,6 +36,10 @@ function hosts(text: string) {
       continue;
     linkTail.lastIndex = hostPattern.lastIndex;
     const tail = linkTail.exec(text)?.[0] ?? '';
+    if (encodedToken) {
+      if (tail) return '[url]';
+      continue;
+    }
     result += text.slice(last, match.index) + (tail ? '[url]' : '[host]');
     last = hostPattern.lastIndex += tail.length;
   }
@@ -113,7 +117,7 @@ export function createFeedbackRedactor(options: { secrets: string[]; profile: Pe
   function text(value: string, stack = false) {
     const decoded = value.replace(/[^\s<>"']*%[0-9a-f]{2}[^\s<>"']*/gi, (encoded) => {
       try {
-        return decodeURIComponent(encoded);
+        return hosts(decodeURIComponent(encoded), true);
       } catch {
         return encoded;
       }
