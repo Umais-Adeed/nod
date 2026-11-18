@@ -135,7 +135,36 @@ export function telegramAttachments(
           signal: operation,
           redirect: 'error',
         });
-        if (!info.ok) throw new Error('The Telegram file is unavailable.');
+        if (!info.ok) {
+          let text = '';
+          if (info.body) {
+            const reader = info.body.getReader();
+            const decoder = new TextDecoder();
+            while (text.length < 4096) {
+              const next = await reader.read();
+              if (next.done) break;
+              text += decoder.decode(next.value, { stream: true });
+            }
+            await reader.cancel().catch(() => {});
+          }
+          let body: unknown;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = undefined;
+          }
+          const failure = z.object({ description: z.string() }).safeParse(body);
+          const reason = failure.success
+            ? failure.data.description
+                .slice(0, 500)
+                .replaceAll(token, '[redacted]')
+                .replaceAll(encodeURIComponent(token), '[redacted]')
+            : info.statusText;
+          if (/file is too big/i.test(reason)) throw new MessagingAttachmentError(20 * 1024 * 1024);
+          throw new Error(
+            `The Telegram file is unavailable (HTTP ${info.status})${reason ? `: ${reason}` : '.'}`,
+          );
+        }
         const parsed = z
           .object({
             ok: z.literal(true),

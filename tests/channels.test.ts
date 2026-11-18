@@ -1548,6 +1548,18 @@ test('Telegram downloads stop at 20 MB whatever size the sender, Bot API or file
     (await download(undefined, () => new Response(new Uint8Array(limit)))).byteLength,
     limit,
   );
+  const refused = (description: string) =>
+    telegramAttachments(message, 'token', async () =>
+      Response.json({ ok: false, error_code: 400, description }, { status: 400 }),
+    )[0].read();
+  await assert.rejects(refused('Bad Request: file is too big'), MessagingAttachmentError);
+  await assert.rejects(refused('Bad Request: invalid file_id for token'), (error: Error) => {
+    assert.equal(
+      error.message,
+      'The Telegram file is unavailable (HTTP 400): Bad Request: invalid file_id for [redacted]',
+    );
+    return true;
+  });
 });
 
 test('speech uses a bounded transcription request and generates Ogg voice output without exposing credentials', async () => {
