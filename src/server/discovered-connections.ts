@@ -174,17 +174,12 @@ function redact(
   return value;
 }
 
-const identifierSetting = /(?:_ID|_SID|USERNAME|USER|EMAIL)$/;
-
-function setupSecrets(paths: AccessPath[], token: string) {
-  const [first] = paths;
-  const settings: Record<string, string> =
-    first.kind === 'cli' && first.env.length > 1
-      ? z.record(envName, z.string()).parse(JSON.parse(token))
-      : Object.fromEntries(paths.map((path) => [path.kind === 'cli' ? path.env[0] : '', token]));
-  return Object.entries(settings)
-    .filter(([name]) => !identifierSetting.test(name))
-    .map(([, value]) => value);
+function secretValues(entered: string | Record<string, string>, visible: string[]) {
+  return typeof entered === 'string'
+    ? [entered]
+    : Object.entries(entered)
+        .filter(([name]) => !visible.includes(name))
+        .map(([, value]) => value);
 }
 
 function target(path: Extract<AccessPath, { kind: 'http' }>, relative: string) {
@@ -228,6 +223,21 @@ export async function createDiscoveredConnections(
 ) {
   const owner = options.ownerId;
   const apps = options.apps ?? bundledApps;
+  function publicSettings(service: string, [path, ...rest]: AccessPath[]) {
+    const app = apps.get(service);
+    if (app?.kind !== 'cli' || app.instancePath || rest.length) return [];
+    const {
+      id: _id,
+      local: _local,
+      ...saved
+    } = path as AccessPath & {
+      id?: string;
+      local?: boolean;
+    };
+    return isDeepStrictEqual(saved, appAccessSchema.parse(appAccessPath(app)))
+      ? app.publicEnvironment
+      : [];
+  }
   function connection(path: AccessPath): AnalyticsConnection {
     return {
       connection_method: path.kind,
@@ -848,13 +858,14 @@ export async function createDiscoveredConnections(
           error: cause,
           path,
         });
+        const values = secretValues(entered, publicSettings(pending.service, pending.paths));
         const reason =
           cause instanceof Error && cause.message
             ? cause.message
             : status
               ? `The service answered ${status}.`
               : 'The service did not confirm access.';
-        const safe = setupSecrets(pending.paths, token).reduce(
+        const safe = [token, ...values].reduce(
           (value, secret) => String(redact(value, secret)),
           reason,
         );
@@ -1538,7 +1549,7 @@ export async function createDiscoveredConnections(
     const { row, call } = await selected(action, args);
     const { path } = call;
     let token: string | undefined;
-    let secrets: string[] = [];
+    const secrets: string[] = [];
     const hide = (value: unknown) =>
       secrets.reduce((result, secret) => redact(result, secret), value);
     const succeeded = (value: unknown) => {
@@ -1562,14 +1573,14 @@ export async function createDiscoveredConnections(
           )
             throw error('This connected account changed.', 409);
           signal?.throwIfAborted();
-          secrets = [token];
+          secrets.push(token);
           const environment =
             path.kind !== 'cli' || !path.env
               ? {}
               : path.env.length > 1
                 ? z.record(envName, z.string()).parse(JSON.parse(token))
                 : { [path.env[0]]: token };
-          secrets = setupSecrets(row.paths, token);
+          secrets.push(...secretValues(environment, publicSettings(row.service, row.paths)));
           let result: unknown;
           if (call.kind === 'http')
             result = await via(call.path).transport.http(

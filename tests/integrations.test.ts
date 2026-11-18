@@ -85,7 +85,12 @@ import { connectedGmail } from '../src/shared/onboarding.ts';
 import { fileBytes } from '../src/shared/files.ts';
 import { connectionGroups } from '../src/web/lib/secondary-pages.ts';
 import { fakeComputer, fakeExecution, fakeWorkspace } from './runtime-fixtures.ts';
-import { appAccessPath, bundledApps, loadAppCatalog } from '../src/server/app-catalog.ts';
+import {
+  appAccessPath,
+  bundledApps,
+  loadAppCatalog,
+  type BundledApp,
+} from '../src/server/app-catalog.ts';
 import { appAccessSchema } from '../src/server/app-access.ts';
 import { checkAppContract } from '../scripts/check-apps.ts';
 import { createApp, type CreateAppOptions } from '../scripts/create-app.ts';
@@ -9875,7 +9880,7 @@ test(
 );
 
 test(
-  'a connected CLI receives each named setting and shows only its identifiers',
+  'a connected CLI receives each named setting and shows only settings its reviewed app makes public',
   { skip: !process.env.TEST_DATABASE_URL },
   async () => {
     const schema = `test_discovered_cli_${randomUUID().replaceAll('-', '')}`;
@@ -9894,7 +9899,31 @@ test(
         keyStore: { id: 'fixture', configured: true, getKey: async () => key },
       });
       const environments: Array<Record<string, string>> = [];
+      const catalog = {
+        slug: 'fixture-catalog',
+        name: 'Fixture catalog',
+        description: 'Synthetic reviewed CLI.',
+        categories: [],
+        kind: 'cli',
+        auth: 'env',
+        command: 'fixturecli',
+        source: { npm: '@fixture/cli@1.2.3' },
+        environment: { FIXTURE_ACCOUNT_ID: 'Account ID', FIXTURE_TOKEN: 'Access token' },
+        publicEnvironment: ['FIXTURE_ACCOUNT_ID'],
+        contract: {
+          $schema: appContractSchemaId,
+          type: 'cli',
+          source: 'https://fixture.example/docs',
+          argv: ['whoami'],
+          timeoutSeconds: 30,
+          format: 'json',
+          annotations: { readOnlyHint: true },
+          output: {},
+        },
+      } satisfies BundledApp;
+      let verified = false;
       const discovered = await createDiscoveredConnections(pool, {
+        apps: new Map([['fixture-catalog', catalog]]),
         ownerId: owner,
         baseUrl: 'http://localhost:4310',
         grantVault,
@@ -9905,7 +9934,7 @@ test(
           return { exitCode: 0, output: report(environment) };
         },
         verifyCli: async (_cli, _argv, environment) => ({
-          exitCode: 1,
+          exitCode: verified ? 0 : 1,
           output: report(environment),
         }),
       });
@@ -9919,7 +9948,7 @@ test(
       const cli = {
         kind: 'cli',
         command: 'fixturecli',
-        env: ['FIXTURE_ACCESS_KEY_ID', 'FIXTURE_SECRET_ACCESS_KEY'],
+        env: ['FIXTURE_SESSION_ID', 'FIXTURE_SECRET_ACCESS_KEY'],
         source: { npm: '@fixture/cli@1.2.3' },
       };
       await assert.rejects(
@@ -9951,9 +9980,9 @@ test(
           payload: { token, accountName: 'Fixture account' },
         });
       assert.equal((await complete('synthetic-single-token')).statusCode, 400);
-      assert.equal((await complete({ FIXTURE_ACCESS_KEY_ID: 'synthetic-key-id' })).statusCode, 400);
+      assert.equal((await complete({ FIXTURE_SESSION_ID: 'synthetic-session' })).statusCode, 400);
       const values = {
-        FIXTURE_ACCESS_KEY_ID: '42',
+        FIXTURE_SESSION_ID: 'synthetic-session',
         FIXTURE_SECRET_ACCESS_KEY: 'synthetic-secret-key',
       };
       assert.equal((await complete(values)).statusCode, 200);
@@ -9968,11 +9997,10 @@ test(
         new AbortController().signal,
       );
       assert.deepEqual(environments, [values]);
-      assert.deepEqual(JSON.parse((result as { output: string }).output), {
-        account: { id: '42' },
-        invoices: [{ number: 'INV-1042', total: 420.5 }],
-        settings: ['42', '[redacted]'],
-      });
+      assert.deepEqual(JSON.parse((result as { output: string }).output).settings, [
+        '[redacted]',
+        '[redacted]',
+      ]);
       const checked = await discovered.propose({
         service: 'fixture-checked',
         name: 'Fixture checked',
@@ -9984,8 +10012,42 @@ test(
         payload: { token: values, accountName: 'Checked' },
       });
       assert.equal(failed.statusCode, 409);
-      assert.match(failed.body, /INV-1042.*420\.5.*\\"42\\",\\"\[redacted\]\\"/);
+      assert.match(failed.body, /\\"\[redacted\]\\",\\"\[redacted\]\\"/);
       assert.equal(failed.body.includes('synthetic-'), false);
+      const reviewed = await discovered.propose({
+        service: 'fixture-catalog',
+        name: 'Fixture catalog',
+        paths: [appAccessSchema.parse(appAccessPath(catalog))],
+      });
+      const reviewedValues = { FIXTURE_ACCOUNT_ID: '42', FIXTURE_TOKEN: 'synthetic-catalog-token' };
+      const completeReviewed = () =>
+        app.inject({
+          method: 'POST',
+          url: `/api/apps/discovery/${new URL(reviewed.url, 'http://localhost:4310').searchParams.get('connect')}/complete`,
+          payload: { token: reviewedValues, accountName: 'Reviewed' },
+        });
+      const refused = await completeReviewed();
+      assert.equal(refused.statusCode, 409);
+      assert.match(refused.body, /INV-1042.*420\.5.*\\"42\\",\\"\[redacted\]\\"/);
+      assert.equal(refused.body.includes('synthetic-'), false);
+      verified = true;
+      assert.equal((await completeReviewed()).statusCode, 200);
+      verified = false;
+      const listed = await pool.query<{ id: string; paths: Array<{ id: string }> }>(
+        "SELECT id,paths FROM discovered_connections WHERE owner_id=$1 AND service='fixture-catalog'",
+        [owner],
+      );
+      const reviewedResult = await discovered.execute(
+        'CONNECTED_CLI',
+        { connectionId: listed.rows[0].id, pathId: listed.rows[0].paths[0].id, argv: ['whoami'] },
+        { threadId: randomUUID(), turnId: randomUUID() },
+        new AbortController().signal,
+      );
+      assert.deepEqual(JSON.parse((reviewedResult as { output: string }).output), {
+        account: { id: '42' },
+        invoices: [{ number: 'INV-1042', total: 420.5 }],
+        settings: ['42', '[redacted]'],
+      });
       const single = await discovered.propose({
         service: 'fixture-tool',
         name: 'Fixture tool',

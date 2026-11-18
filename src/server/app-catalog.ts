@@ -51,6 +51,7 @@ export type BundledApp = AppMetadata &
         command: string;
         source: Extract<AppDefinition['connection'], { type: 'cli' }>['source'];
         environment: Record<string, string>;
+        publicEnvironment: string[];
         contract: Extract<AppContract, { type: 'cli' }>;
       }
   );
@@ -180,6 +181,7 @@ export function loadAppCatalog(directory = fileURLToPath(new URL('../apps/', imp
           command: connection.command,
           source: connection.source,
           environment: connection.environment,
+          publicEnvironment: connection.publicEnvironment ?? [],
           contract: fixture,
         };
       }

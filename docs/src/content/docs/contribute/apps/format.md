@@ -113,7 +113,7 @@ Nod applies its address policy outside the manifest. Only n8n has the existing l
 
 Use `type: "http"` with a public HTTPS `url`. Select one authentication method: `oauth2`, `bearer`, or `x-api-key`. Only API-key connections accept `apiKeyHeader`. Only OAuth connections accept `scopes`, `oauth`, and `clientIdRequired`.
 
-Use `type: "cli"` with `command`, a pinned `source`, `authentication: ["env"]`, and an `environment` label map. The map contains one to 16 fields. Names have at most 64 characters. The CLI fixture supplies the read check and its timeout.
+Use `type: "cli"` with `command`, a pinned `source`, `authentication: ["env"]`, and an `environment` label map. The map contains one to 16 fields. An optional `publicEnvironment` list names the settings whose values may appear in command output. Names have at most 64 characters. The CLI fixture supplies the read check and its timeout.
 
 API and CLI folders omit `mcp.json`. Unknown fields, extra transports, app-folder install scripts or hooks, static secrets, control headers, and mismatched read fixtures fail the required checks. The sealed installer can run package install scripts from the declared CLI source before it adds credentials.
 

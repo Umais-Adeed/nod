@@ -489,6 +489,15 @@
               },
               "minProperties": 1,
               "maxProperties": 16
+            },
+            "publicEnvironment": {
+              "maxItems": 15,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^(?=.*(?:TOKEN|KEY|SECRET|PASSWORD|_ID|_SID|USERNAME|USER|EMAIL|URL)$)[A-Z][A-Z0-9_]*$"
+              }
             }
           },
           "required": ["type", "command", "source", "authentication", "environment"],

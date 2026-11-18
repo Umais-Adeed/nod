@@ -154,16 +154,26 @@ export const appConnectionSchema = z.union([
     authentication: z.tuple([z.literal('x-api-key')]),
     apiKeyHeader: appApiKeyHeaderSchema.optional(),
   }),
-  z.strictObject({
-    type: z.literal('cli'),
-    command: appCliCommandSchema,
-    source: appCliSourceSchema,
-    authentication: z.tuple([z.literal('env')]),
-    environment: z
-      .record(appEnvironmentNameSchema, text(100))
-      .refine((value) => Object.keys(value).length >= 1 && Object.keys(value).length <= 16)
-      .meta({ minProperties: 1, maxProperties: 16 }),
-  }),
+  z
+    .strictObject({
+      type: z.literal('cli'),
+      command: appCliCommandSchema,
+      source: appCliSourceSchema,
+      authentication: z.tuple([z.literal('env')]),
+      environment: z
+        .record(appEnvironmentNameSchema, text(100))
+        .refine((value) => Object.keys(value).length >= 1 && Object.keys(value).length <= 16)
+        .meta({ minProperties: 1, maxProperties: 16 }),
+      publicEnvironment: z.array(appEnvironmentNameSchema).max(15).optional(),
+    })
+    .refine(
+      (value) =>
+        !value.publicEnvironment ||
+        (new Set(value.publicEnvironment).size === value.publicEnvironment.length &&
+          value.publicEnvironment.every((name) => name in value.environment) &&
+          value.publicEnvironment.length < Object.keys(value.environment).length),
+      'publicEnvironment names distinct environment settings and leaves at least one secret.',
+    ),
 ]);
 
 export const appDefinitionSchema = z.strictObject({
