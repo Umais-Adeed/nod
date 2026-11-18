@@ -174,6 +174,19 @@ function redact(
   return value;
 }
 
+const identifierSetting = /(?:_ID|_SID|USERNAME|USER|EMAIL)$/;
+
+function setupSecrets(paths: AccessPath[], token: string) {
+  const [first] = paths;
+  const settings: Record<string, string> =
+    first.kind === 'cli' && first.env.length > 1
+      ? z.record(envName, z.string()).parse(JSON.parse(token))
+      : Object.fromEntries(paths.map((path) => [path.kind === 'cli' ? path.env[0] : '', token]));
+  return Object.entries(settings)
+    .filter(([name]) => !identifierSetting.test(name))
+    .map(([, value]) => value);
+}
+
 function target(path: Extract<AccessPath, { kind: 'http' }>, relative: string) {
   try {
     return appRequestUrl(path.endpoint, relative);
@@ -835,14 +848,13 @@ export async function createDiscoveredConnections(
           error: cause,
           path,
         });
-        const values = typeof entered === 'string' ? [entered] : Object.values(entered);
         const reason =
           cause instanceof Error && cause.message
             ? cause.message
             : status
               ? `The service answered ${status}.`
               : 'The service did not confirm access.';
-        const safe = [token, ...values].reduce(
+        const safe = setupSecrets(pending.paths, token).reduce(
           (value, secret) => String(redact(value, secret)),
           reason,
         );
@@ -1526,7 +1538,7 @@ export async function createDiscoveredConnections(
     const { row, call } = await selected(action, args);
     const { path } = call;
     let token: string | undefined;
-    const secrets: string[] = [];
+    let secrets: string[] = [];
     const hide = (value: unknown) =>
       secrets.reduce((result, secret) => redact(result, secret), value);
     const succeeded = (value: unknown) => {
@@ -1550,14 +1562,14 @@ export async function createDiscoveredConnections(
           )
             throw error('This connected account changed.', 409);
           signal?.throwIfAborted();
-          secrets.push(token);
+          secrets = [token];
           const environment =
             path.kind !== 'cli' || !path.env
               ? {}
               : path.env.length > 1
                 ? z.record(envName, z.string()).parse(JSON.parse(token))
                 : { [path.env[0]]: token };
-          secrets.push(...Object.values(environment));
+          secrets = setupSecrets(row.paths, token);
           let result: unknown;
           if (call.kind === 'http')
             result = await via(call.path).transport.http(

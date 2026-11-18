@@ -9875,7 +9875,7 @@ test(
 );
 
 test(
-  'a connected CLI receives each named setting and never shows their values',
+  'a connected CLI receives each named setting and shows only its identifiers',
   { skip: !process.env.TEST_DATABASE_URL },
   async () => {
     const schema = `test_discovered_cli_${randomUUID().replaceAll('-', '')}`;
@@ -9902,12 +9902,19 @@ test(
         oauth: {} as Parameters<typeof createDiscoveredConnections>[1]['oauth'],
         runCli: async (_thread, _cli, _argv, environment) => {
           environments.push(environment);
-          return {
-            exitCode: 0,
-            output: `signed in as ${Object.values(environment).join(' and ')}`,
-          };
+          return { exitCode: 0, output: report(environment) };
         },
+        verifyCli: async (_cli, _argv, environment) => ({
+          exitCode: 1,
+          output: report(environment),
+        }),
       });
+      const report = (environment: Record<string, string>) =>
+        JSON.stringify({
+          account: { id: '42' },
+          invoices: [{ number: 'INV-1042', total: 420.5 }],
+          settings: Object.values(environment),
+        });
       discovered.registerRoutes(app);
       const cli = {
         kind: 'cli',
@@ -9946,7 +9953,7 @@ test(
       assert.equal((await complete('synthetic-single-token')).statusCode, 400);
       assert.equal((await complete({ FIXTURE_ACCESS_KEY_ID: 'synthetic-key-id' })).statusCode, 400);
       const values = {
-        FIXTURE_ACCESS_KEY_ID: 'synthetic-key-id',
+        FIXTURE_ACCESS_KEY_ID: '42',
         FIXTURE_SECRET_ACCESS_KEY: 'synthetic-secret-key',
       };
       assert.equal((await complete(values)).statusCode, 200);
@@ -9961,7 +9968,24 @@ test(
         new AbortController().signal,
       );
       assert.deepEqual(environments, [values]);
-      assert.equal(JSON.stringify(result).includes('synthetic-'), false);
+      assert.deepEqual(JSON.parse((result as { output: string }).output), {
+        account: { id: '42' },
+        invoices: [{ number: 'INV-1042', total: 420.5 }],
+        settings: ['42', '[redacted]'],
+      });
+      const checked = await discovered.propose({
+        service: 'fixture-checked',
+        name: 'Fixture checked',
+        paths: [{ ...cli, testArgv: ['whoami'] }],
+      });
+      const failed = await app.inject({
+        method: 'POST',
+        url: `/api/apps/discovery/${new URL(checked.url, 'http://localhost:4310').searchParams.get('connect')}/complete`,
+        payload: { token: values, accountName: 'Checked' },
+      });
+      assert.equal(failed.statusCode, 409);
+      assert.match(failed.body, /INV-1042.*420\.5.*\\"42\\",\\"\[redacted\]\\"/);
+      assert.equal(failed.body.includes('synthetic-'), false);
       const single = await discovered.propose({
         service: 'fixture-tool',
         name: 'Fixture tool',
@@ -9982,13 +10006,16 @@ test(
         "SELECT id,paths FROM discovered_connections WHERE owner_id=$1 AND service='fixture-tool'",
         [owner],
       );
-      await discovered.execute(
+      const toolResult = await discovered.execute(
         'CONNECTED_CLI',
         { connectionId: tool.rows[0].id, pathId: tool.rows[0].paths[0].id, argv: ['whoami'] },
         { threadId: randomUUID(), turnId: randomUUID() },
         new AbortController().signal,
       );
       assert.deepEqual(environments.at(-1), { FIXTURE_TOKEN: 'synthetic-tool-token' });
+      assert.deepEqual(JSON.parse((toolResult as { output: string }).output).settings, [
+        '[redacted]',
+      ]);
     } finally {
       await app.close();
       await pool.end();
