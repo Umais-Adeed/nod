@@ -2272,7 +2272,7 @@ export function Chat({
                           ...(task.kind
                             ? { kind: task.kind === 'ongoing' ? 'ongoing' : 'immediate' }
                             : {}),
-                          origin: task.origin === 'common' ? 'common' : 'learned',
+                          origin: task.origin ?? 'learned',
                           position,
                         });
                         void send(task.title, [], null, 'task_card');
