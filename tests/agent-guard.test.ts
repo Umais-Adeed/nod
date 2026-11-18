@@ -11,7 +11,12 @@ import type { Pool } from 'pg';
 import { Compile } from 'typebox/compile';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
-import { appConfirmation, ContextLimitError, ModelRequestError } from '../src/ports/agent.ts';
+import {
+  appConfirmation,
+  ContextLimitError,
+  ModelRequestError,
+  outputLimitReached,
+} from '../src/ports/agent.ts';
 import type {
   Agent,
   AgentEvent,
@@ -98,7 +103,11 @@ test('only a terminal context failure requests a chat context restart', async (t
               !(error instanceof ContextLimitError) &&
               error.message.includes(ending === 'quota' ? 'Synthetic quota exceeded.' : 'HTTP 401')
             );
-          return error instanceof Error && error.constructor === Error;
+          return (
+            error instanceof Error &&
+            error.constructor === Error &&
+            error.message === outputLimitReached
+          );
         });
     });
 });

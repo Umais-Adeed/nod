@@ -50,7 +50,12 @@ import type {
   RuntimeContext,
   RuntimeResult,
 } from '../ports/agent.ts';
-import { appConfirmation, ContextLimitError, ModelRequestError } from '../ports/agent.ts';
+import {
+  appConfirmation,
+  ContextLimitError,
+  ModelRequestError,
+  outputLimitReached,
+} from '../ports/agent.ts';
 import { isMessageReaction, reactionEmoji } from '../shared/emoji.ts';
 import { defaultPreferences, isQuietTime } from './preferences.ts';
 import { formattingLocale, timeZoneRegion } from '../shared/date-locale.ts';
@@ -2521,7 +2526,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       const server = Boolean(offline && dependencies.desktopRuntime);
       if (
         await failTurn(turnId, dependencies.present, text, {
-          failure,
+          failure:
+            error instanceof Error && error.message === outputLimitReached ? undefined : failure,
           next: alternative ?? (server ? offlineHint : undefined),
           contextExhausted: error instanceof ContextLimitError,
           cause: offline

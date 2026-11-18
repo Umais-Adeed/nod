@@ -1,3 +1,4 @@
+import { appPages } from '../shared/app-links.ts';
 import type { Presentation } from '../shared/presentation.ts';
 import type { AnswerChoices } from '../shared/answer-choices.ts';
 import type { ProviderUsageEvent } from './provider-usage.ts';
@@ -404,3 +405,4 @@ export interface Agent {
 }
 export class ModelRequestError extends Error {}
 export class ContextLimitError extends ModelRequestError {}
+export const outputLimitReached = `The model response was cut off at its output limit. Say continue to pick up where it stopped, or choose a model with a larger output limit in ${appPages['/settings/models']}.`;
