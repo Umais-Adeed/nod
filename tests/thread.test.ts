@@ -11397,7 +11397,7 @@ test(
 );
 
 test(
-  'bug report drafts send their stored summary once, after any rejected attempt, and only for their owner',
+  'bug report drafts send their stored summary once, after a rejected attempt, and only for their owner',
   { skip: !process.env.TEST_DATABASE_URL, timeout: 30_000 },
   async (t) => {
     const f = await feedbackFixture(t);
@@ -11429,6 +11429,10 @@ test(
       (await owner.app.inject({ method: 'GET', url: `/api/feedback/drafts/${id}` })).json().receipt,
       null,
     );
+    assert.equal(
+      (await owner.app.inject({ method: 'GET', url: `/api/feedback/${id}` })).json().status,
+      'rejected',
+    );
     f.state.receiptStatus = 'submitted';
     assert.equal((await owner.app.inject(send)).json().status, 'submitted');
     assert.equal((await owner.app.inject(send)).json().status, 'submitted');
@@ -11440,6 +11444,32 @@ test(
         .status,
       'submitted',
     );
+    const uncertain = randomUUID();
+    await f.pool.query(
+      'INSERT INTO feedback_drafts(id,owner_id,thread_id,summary) VALUES($1,$2,$3,$4)',
+      [uncertain, owner.ownerId, randomUUID(), 'Synthetic uncertain summary.'],
+    );
+    const resend = { ...send, url: `/api/feedback/drafts/${uncertain}/send` };
+    f.state.receiptStatus = 'unknown';
+    assert.equal((await owner.app.inject(resend)).json().status, 'unknown');
+    f.state.receiptStatus = 'submitted';
+    assert.equal((await owner.app.inject(resend)).json().status, 'unknown');
+    assert.equal(f.state.envelopes.length, 3);
+    const claimed = randomUUID();
+    await f.pool.query(
+      'INSERT INTO feedback_drafts(id,owner_id,thread_id,summary) VALUES($1,$2,$3,$4)',
+      [claimed, owner.ownerId, randomUUID(), 'Synthetic claimed summary.'],
+    );
+    assert.equal(
+      (await owner.app.inject({ method: 'GET', url: `/api/feedback/${claimed}` })).json().status,
+      'rejected',
+    );
+    assert.equal(
+      (await owner.app.inject({ ...send, url: `/api/feedback/drafts/${claimed}/send` })).json()
+        .status,
+      'submitted',
+    );
+    assert.equal(f.state.envelopes.length, 4);
   },
 );
 

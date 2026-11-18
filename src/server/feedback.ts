@@ -216,6 +216,7 @@ export async function registerFeedback(
   const deliver = async (
     input: z.infer<typeof submission>,
     abandoned: () => boolean = () => false,
+    retry = false,
   ): Promise<FeedbackReceipt> => {
     const capture = snapshotAnalytics(options.analytics);
     if (!options.delivery.configured) throw fail('Feedback sending is not configured yet.', 503);
@@ -224,7 +225,7 @@ export async function registerFeedback(
       'SELECT * FROM feedback_submissions WHERE owner_id=$1 AND id=$2',
       [options.ownerId, input.submissionId],
     );
-    if (previous.rows[0]) {
+    if (previous.rows[0] && !(retry && previous.rows[0].status === 'rejected')) {
       if (previous.rows[0].request_hash !== requestHash && !rejectionClaim(previous.rows[0]))
         throw fail('This submission already has different content.', 409);
       return receipt(previous.rows[0]);
@@ -264,7 +265,13 @@ export async function registerFeedback(
     };
     const inserted = await options.pool.query(
       `INSERT INTO feedback_submissions(owner_id,id,request_hash,payload_hash,status)
-       VALUES($1,$2,$3,$4,'unknown') ON CONFLICT DO NOTHING RETURNING id`,
+       VALUES($1,$2,$3,$4,'unknown') ON CONFLICT(owner_id,id) ${
+         retry
+           ? `DO UPDATE SET request_hash=EXCLUDED.request_hash,payload_hash=EXCLUDED.payload_hash,
+              status='unknown',issue_url=NULL,created_at=now(),updated_at=now()
+              WHERE feedback_submissions.status='rejected'`
+           : 'DO NOTHING'
+       } RETURNING id`,
       [options.ownerId, input.submissionId, requestHash, envelope.payloadHash],
     );
     if (!inserted.rowCount) {
@@ -331,10 +338,6 @@ export async function registerFeedback(
     if (!draft) throw fail('This bug report is no longer available.', 404);
     const sent = await sentReceipt(id);
     if (sent) return sent;
-    await options.pool.query(
-      `DELETE FROM feedback_submissions WHERE owner_id=$1 AND id=$2 AND status='rejected'`,
-      [options.ownerId, id],
-    );
     return deliver(
       {
         submissionId: id,
@@ -345,6 +348,7 @@ export async function registerFeedback(
         attachments: [],
       },
       abandoned,
+      true,
     );
   };
   const draftFor = async (threadId: string, sourceMessageId?: string | null) => {
