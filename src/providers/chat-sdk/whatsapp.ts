@@ -756,7 +756,7 @@ export function createWhatsAppLinkedTransport(options: {
                 bytes.subarray(opus, opus + 8).toString('latin1') === 'OpusHead' &&
                 bytes[opus + 9] === 1
               ? { audio: bytes, mimetype: 'audio/ogg; codecs=opus', ptt: true }
-              : /^audio\/(?:mpeg|mp4|aac|amr)$/.test(file.mimeType)
+              : /^audio\/(?:mpeg|mp4|aac|amr)\s*(?:;|$)/i.test(file.mimeType)
                 ? { audio: bytes, mimetype: file.mimeType }
                 : { document: bytes, mimetype: file.mimeType, fileName: file.name };
         ids.push(await send(input.threadId, { ...media, ...(caption ? { caption } : {}) }, quote));

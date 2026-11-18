@@ -1054,6 +1054,10 @@ test(
                 'document',
               ],
               [audioFile('reply.mp3', 'audio/mpeg', Buffer.from('ID3 synthetic')), 'audio'],
+              [
+                audioFile('reply.m4a', 'audio/mp4; codecs=mp4a.40.2', Buffer.from('synthetic')),
+                'audio',
+              ],
             ] as const) {
               const before = sent.length;
               await transport.post({
