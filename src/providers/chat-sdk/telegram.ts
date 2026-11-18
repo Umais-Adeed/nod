@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ChannelPairingRequest, MessagingAttachment } from '../../ports/messaging.ts';
 import { MessagingAttachmentError } from '../../ports/messaging.ts';
+import { modelServiceError } from '../model-error.ts';
 import { contactAttachment, locationAttachment, telegramContactCard } from './content.ts';
 import { sharedLocation } from '../../shared/channel-content.ts';
 
@@ -136,34 +137,15 @@ export function telegramAttachments(
           redirect: 'error',
         });
         if (!info.ok) {
-          let text = '';
-          if (info.body) {
-            const reader = info.body.getReader();
-            const decoder = new TextDecoder();
-            while (text.length < 4096) {
-              const next = await reader.read();
-              if (next.done) break;
-              text += decoder.decode(next.value, { stream: true });
-            }
-            await reader.cancel().catch(() => {});
-          }
-          let body: unknown;
-          try {
-            body = JSON.parse(text);
-          } catch {
-            body = undefined;
-          }
-          const failure = z.object({ description: z.string() }).safeParse(body);
-          const reason = failure.success
-            ? failure.data.description
-                .slice(0, 500)
-                .replaceAll(token, '[redacted]')
-                .replaceAll(encodeURIComponent(token), '[redacted]')
-            : info.statusText;
-          if (/file is too big/i.test(reason)) throw new MessagingAttachmentError(20 * 1024 * 1024);
-          throw new Error(
-            `The Telegram file is unavailable (HTTP ${info.status})${reason ? `: ${reason}` : '.'}`,
+          const failure = await modelServiceError(
+            info,
+            'Telegram getFile',
+            [token, encodeURIComponent(token)],
+            ['description', 'error_code'],
           );
+          if (/file is too big/i.test(failure.reason ?? ''))
+            throw new MessagingAttachmentError(20 * 1024 * 1024);
+          throw failure;
         }
         const parsed = z
           .object({

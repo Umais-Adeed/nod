@@ -1552,11 +1552,14 @@ test('Telegram downloads stop at 20 MB whatever size the sender, Bot API or file
     telegramAttachments(message, 'token', async () =>
       Response.json({ ok: false, error_code: 400, description }, { status: 400 }),
     )[0].read();
-  await assert.rejects(refused('Bad Request: file is too big'), MessagingAttachmentError);
+  await assert.rejects(
+    refused('Bad Request: file is too big'),
+    (error: unknown) => error instanceof MessagingAttachmentError && error.maxBytes === limit,
+  );
   await assert.rejects(refused('Bad Request: invalid file_id for token'), (error: Error) => {
     assert.equal(
       error.message,
-      'The Telegram file is unavailable (HTTP 400): Bad Request: invalid file_id for [redacted]',
+      'Telegram getFile failed (HTTP 400): description: Bad Request: invalid file_id for [redacted]; error_code: 400',
     );
     return true;
   });
