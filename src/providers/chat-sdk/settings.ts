@@ -103,18 +103,24 @@ export function createChatSdkSetupVerifier(
       target.hostname === 'api.telegram.org'
         ? `Telegram ${target.pathname.split('/').at(-1)}`
         : 'WhatsApp Cloud API';
+    const lost = (error: unknown) => {
+      const reason = unreachable(error);
+      return new ChannelSetupFailure(
+        'verification_failed',
+        `${service} could not be reached${reason ? `: ${reason}` : ''}.`,
+      );
+    };
     let response: Response;
     try {
       response = await request(url, { ...init, signal: AbortSignal.timeout(15_000) });
     } catch (error) {
-      const reason = unreachable(error);
-      throw new ChannelSetupFailure(
-        'verification_failed',
-        `${service} could not be reached${reason ? `: ${reason}` : ''}.`,
-      );
+      throw lost(error);
     }
     if (response.ok) {
-      const data = z.record(z.string(), z.unknown()).parse(await response.json());
+      const body = await response.json().catch((error: unknown) => {
+        throw unreachable(error) ? lost(error) : error;
+      });
+      const data = z.record(z.string(), z.unknown()).parse(body);
       if (data.ok !== false && !data.error) return data;
       response = Response.json(data, { status: response.status });
     }

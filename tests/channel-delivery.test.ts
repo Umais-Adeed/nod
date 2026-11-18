@@ -162,6 +162,10 @@ test('channel verification keeps service failures specific and removes submitted
       error: 'Telegram getMe could not be reached: timed out after 15 seconds.',
     },
     {
+      broken: new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      error: 'Telegram getMe could not be reached: timed out after 15 seconds.',
+    },
+    {
       provider: 'whatsapp',
       thrown: new TypeError(`fetch failed ${whatsapp.accessToken}`, {
         cause: Object.assign(new Error(`getaddrinfo ENOTFOUND ${whatsapp.accessToken}`), {
@@ -218,6 +222,11 @@ test('channel verification keeps service failures specific and removes submitted
           }
           assert.equal(String(url), `https://api.telegram.org/bot${token}/getMe`);
           if (scenario.thrown) throw scenario.thrown;
+          if (scenario.broken)
+            return new Response(
+              new ReadableStream({ start: (controller) => controller.error(scenario.broken) }),
+              { headers: { 'content-type': 'application/json' } },
+            );
           return Response.json(
             {
               ok: false,
