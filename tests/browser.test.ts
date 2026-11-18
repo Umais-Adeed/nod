@@ -2859,6 +2859,11 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Open "https://tenant.example.test/Personal%20Notes/log.txt" failed with HTTP 412.',
     'Rejected fixture%2fsecret-token and marta.vidal%40example.test.',
     'External record 00000000-1111-4222-8333-444444444444 was not found.',
+    '/media/private-owner/BACKUP/Medical Notes/scan.pdf does not exist.',
+    '/run/media/private-owner/USB/Tax Return/form.pdf does not exist.',
+    'Book a slot at calendly.com/synthetic-booker/30min please.',
+    'Profile www.example.com/in/synthetic-profile?ref=private-ref#private-anchor failed.',
+    'Redirect via unlisted.notatld/next?to=example.com/synthetic-hidden failed.',
     { type: 'image', data: 'synthetic-private-image' },
     {
       content: [
@@ -2905,6 +2910,15 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Client Records',
     'Design Review',
     'Private Files',
+    'Medical Notes',
+    'Tax Return',
+    'BACKUP',
+    'synthetic-booker',
+    '30min',
+    'synthetic-profile',
+    'private-ref',
+    'private-anchor',
+    'synthetic-hidden',
     'fixture',
     'marta.vidal',
     '00000000-1111',
@@ -2936,8 +2950,16 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'HTTP 410',
     'HTTP 411',
     'HTTP 412',
+    'Book a slot at [url] please',
   ])
     assert.ok(encoded.includes(useful), useful);
+  const { timeZoneRegion } = await import('../src/shared/date-locale.ts');
+  const local = createFeedbackRedactor({
+    secrets: [],
+    profile: { names: [], region: timeZoneRegion('America/Los_Angeles') ?? undefined },
+  }).text('Call the clinic at (415) 555-0134 today.');
+  assert.ok(!local.includes('555-0134'), local);
+  assert.ok(local.includes('Call the clinic'), local);
   const concealedType = createFeedbackRedactor({ secrets: ['image'], profile: { names: [] } });
   assert.ok(
     !JSON.stringify(concealedType.value({ type: 'image', data: 'c3ludGhldGljIGltYWdl' })).includes(

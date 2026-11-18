@@ -18,6 +18,19 @@ const opening = /\{(?=\s*["}])|\[(?=\s*(?:[\[\]{"\d-]|true\b|false\b|null\b))/g;
 const appFile =
   /^(?:src\/(?:server|providers|ports|shared|web|runtime)|dist|desktop\/main|node_modules)\/[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 const className = /^[A-Za-z][A-Za-z0-9_$]{0,80}$/;
+const hostPattern =
+  /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b([/?#][^\s<>"']*)?/gi;
+
+function hosts(_: string, host: string, rest = ''): string {
+  const domain = parse(host, { allowPrivateDomains: true });
+  if (
+    domain.isIcann ||
+    domain.isPrivate ||
+    /\.(?:internal|local|localhost|test|invalid)$/i.test(host)
+  )
+    return rest ? '[url]' : '[host]';
+  return host + rest.replace(hostPattern, hosts);
+}
 
 function normalize(key: string) {
   return key.replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -133,7 +146,7 @@ export function createFeedbackRedactor(options: { secrets: string[]; profile: Pe
       )
       .replace(/(["'])(?:[A-Za-z]:[\\/]|~?\/)[^\r\n]*?\1/g, '[path]')
       .replace(
-        /(?:[A-Za-z]:[\\/]|(?:~\/|\/(?:Users|home)\/[^/\r\n]+\/|\/(?:root|private|var|tmp|Volumes|mnt|workspace|app|data)\/))[^\r\n]*/g,
+        /(?:[A-Za-z]:[\\/]|(?:~\/|\/(?:Users|home)\/[^/\r\n]+\/|\/(?:root|private|var|tmp|Volumes|mnt|media|run\/media|workspace|app|data)\/))[^\r\n]*/g,
         (value) => location(value, '[path]'),
       )
       .replace(
@@ -147,14 +160,7 @@ export function createFeedbackRedactor(options: { secrets: string[]; profile: Pe
         '[identifier]',
       )
       .replace(/\b[A-Za-z0-9+/=_-]{128,}\b/g, '[encoded data omitted]')
-      .replace(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\b/gi, (host) => {
-        const domain = parse(host, { allowPrivateDomains: true });
-        return domain.isIcann ||
-          domain.isPrivate ||
-          /\.(?:internal|local|localhost|test|invalid)$/i.test(host)
-          ? '[host]'
-          : host;
-      })
+      .replace(hostPattern, hosts)
       .replace(/\0(\d+)\0/g, (_, index: string) => frames[Number(index)] ?? '[path]');
   }
 
