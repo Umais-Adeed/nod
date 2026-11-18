@@ -631,6 +631,26 @@ const attachment = (name: string, mimeType: string, text: string) => ({
   read: async () => Buffer.from(text),
 });
 
+const audioFile = (name: string, mimeType: string, bytes: Buffer) => ({
+  name,
+  mimeType,
+  size: bytes.length,
+  read: async () => bytes,
+});
+
+const oggOpus = (channels: number) => {
+  const head = Buffer.concat([
+    Buffer.from('OpusHead'),
+    Buffer.from([1, channels, 0, 0, 0x80, 0xbb, 0, 0, 0, 0, 0]),
+  ]);
+  return Buffer.concat([
+    Buffer.from('OggS'),
+    Buffer.alloc(22),
+    Buffer.from([1, head.length]),
+    head,
+  ]);
+};
+
 const fixtureEnv = {
   TELEGRAM_ENABLED: 'true',
   TELEGRAM_BOT_TOKEN: '987:fixture-not-live',
@@ -1010,10 +1030,11 @@ test(
               text: '**Task complete**',
               replyToMessageId: 'task-prompt',
               replyToText: 'Fixture task question',
-              attachments: [attachment('reply.ogg', 'audio/ogg', 'synthetic voice')],
+              attachments: [audioFile('reply.ogg', 'audio/ogg', oggOpus(1))],
             });
             assert.equal(sent[0].content.text, '*Task complete*');
             assert.equal(sent[1].content.ptt, true);
+            assert.equal(sent[1].content.mimetype, 'audio/ogg; codecs=opus');
             assert.deepEqual(
               result.ids,
               sent.map((message) => message.id),
@@ -1022,6 +1043,37 @@ test(
               (sent[0].quoted as { message: { conversation: string } }).message.conversation,
               'Fixture task question',
             );
+            for (const [file, kind] of [
+              [
+                audioFile('reply.wav', 'audio/wav', Buffer.from('RIFF\0\0\0\0WAVEfmt ')),
+                'document',
+              ],
+              [audioFile('stereo.ogg', 'audio/ogg', oggOpus(2)), 'document'],
+              [
+                audioFile('vorbis.ogg', 'audio/ogg', Buffer.from('OggS synthetic vorbis')),
+                'document',
+              ],
+              [audioFile('reply.mp3', 'audio/mpeg', Buffer.from('ID3 synthetic')), 'audio'],
+            ] as const) {
+              const before = sent.length;
+              await transport.post({
+                channelId: 'whatsapp',
+                accountId,
+                threadId: jid,
+                text: 'Spoken result',
+                attachments: [file],
+              });
+              assert.deepEqual(
+                sent
+                  .slice(before)
+                  .map((message) => message.content.text ?? message.content.caption),
+                ['Spoken result', undefined],
+              );
+              const media = sent.at(-1)!.content;
+              assert.ok(media[kind], file.name);
+              assert.equal(media.ptt, undefined);
+              if (kind === 'document') assert.equal(media.fileName, file.name);
+            }
             const beforeImage = sent.length;
             const imageReply = await transport.post({
               channelId: 'whatsapp',
