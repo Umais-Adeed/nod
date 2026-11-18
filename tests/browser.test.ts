@@ -2873,6 +2873,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Open example%2Ecom%2FSynthetic-malformed%20Escape%E0 failed.',
     'Open 192.168.1.20:8080/synthetic-ip-path failed.',
     'Open localhost:5678/synthetic-localhost-path failed.',
+    'Open 127.0.0.1:8080/synthetic-loopback-path failed.',
     'request to http://localhost:5678/Synthetic Spaced Folder/mcp failed, reason: connect ECONNREFUSED 127.0.0.1:5678, HTTP/1.1 503',
     { type: 'image', data: 'synthetic-private-image' },
     {
@@ -2939,6 +2940,10 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Escape',
     'synthetic-ip-path',
     'synthetic-localhost-path',
+    'synthetic-loopback-path',
+    '192.168.1.20',
+    'Open localhost',
+    'Open 127.0.0.1',
     'Spaced Folder',
     'fixture',
     'marta.vidal',

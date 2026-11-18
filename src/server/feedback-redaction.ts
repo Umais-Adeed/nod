@@ -21,7 +21,7 @@ const appFile =
   /^(?:src\/(?:server|providers|ports|shared|web|runtime)|dist|desktop\/main|node_modules)\/[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 const className = /^[A-Za-z][A-Za-z0-9_$]{0,80}$/;
 const hostPattern =
-  /(?:\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?|\[ip\]|\blocalhost\b)(?::\d{1,5})?/gi;
+  /(?:\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(?:\.(?=[:/?#]))?|\[ip\]|\blocalhost\b|(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.]))(?::\d{1,5})?/gi;
 const linkTail = /[/?#][^\r\n]*/y;
 const errorNames = new Set<string>([
   ...Object.keys(constants.errno),
