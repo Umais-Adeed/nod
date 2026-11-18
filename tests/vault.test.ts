@@ -4476,6 +4476,7 @@ const beforeArtifact=count('artifact_viewed');
 await act(async()=>{visible('.artifact-drawer');visible('.artifact-drawer .message-presentation')});
 check('UI8-presentation-dedupe',count('presentation_viewed')===beforePresentation+1);
 check('UI8-presentation-not-file',count('artifact_viewed')===beforeArtifact);
+check('UI8-schedule-run-not-file',conversationFiles([{id:'private-schedule-run-message',attachments:[],presentation:{...common,type:'schedule-run',scheduleId:'6f1c1d3e-8a3b-4c7e-9d2a-1b2c3d4e5f60',revision:0,outcome:'ran',dueAt:'2035-11-09T08:00:00.000Z',startedAt:'2035-11-09T09:12:00.000Z',skipped:[],timeZone:'Europe/Lisbon'}}]).length===0);
 const copyContents=()=>document.querySelector('button[aria-label="Copy contents"],button[aria-label="Copied"]');
 const presentationCopies=()=>events.filter(event=>event.event==='presentation_action'&&event.properties.action==='copy').length;
 await act(async()=>copyContents().click());
