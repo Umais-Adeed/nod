@@ -169,9 +169,10 @@ export const appConnectionSchema = z.union([
           z
             .string()
             .max(appEnvironmentNameMaxLength)
-            .regex(/^[A-Z][A-Z0-9_]*(?:_ID|_SID|USERNAME|USER|EMAIL)$/),
+            .regex(/^(?=.*(?:_ID|_SID|USERNAME|USER|EMAIL)$)[A-Z][A-Z0-9_]*$/),
         )
         .max(15)
+        .meta({ uniqueItems: true })
         .optional(),
     })
     .refine(

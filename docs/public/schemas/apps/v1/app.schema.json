@@ -496,8 +496,9 @@
               "items": {
                 "type": "string",
                 "maxLength": 64,
-                "pattern": "^[A-Z][A-Z0-9_]*(?:_ID|_SID|USERNAME|USER|EMAIL)$"
-              }
+                "pattern": "^(?=.*(?:_ID|_SID|USERNAME|USER|EMAIL)$)[A-Z][A-Z0-9_]*$"
+              },
+              "uniqueItems": true
             }
           },
           "required": ["type", "command", "source", "authentication", "environment"],

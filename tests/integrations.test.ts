@@ -460,6 +460,16 @@ test('API and CLI app scaffolds pass real transport and process contracts and re
       assert(
         appDefinitionSchema.safeParse(listed({ publicEnvironment: ['SAMPLE_ACCOUNT_ID'] })).success,
       );
+      const user = listed({
+        environment: { ...definition.connection.environment, USER: 'User' },
+        publicEnvironment: ['USER'],
+      });
+      assert(appDefinitionSchema.safeParse(user).success);
+      assert(editor.Check(user));
+      assert.equal(
+        editor.Check(listed({ publicEnvironment: ['SAMPLE_ACCOUNT_ID', 'SAMPLE_ACCOUNT_ID'] })),
+        false,
+      );
       for (const change of [
         { publicEnvironment: ['SAMPLE_ACCOUNT_ID', 'SAMPLE_ACCOUNT_ID'] },
         { publicEnvironment: ['SAMPLE_OTHER_ID'] },
