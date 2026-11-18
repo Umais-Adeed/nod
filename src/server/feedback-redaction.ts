@@ -19,17 +19,17 @@ const appFile =
   /^(?:src\/(?:server|providers|ports|shared|web|runtime)|dist|desktop\/main|node_modules)\/[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 const className = /^[A-Za-z][A-Za-z0-9_$]{0,80}$/;
 const hostPattern =
-  /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b([/?#][^\s<>"']*)?/gi;
+  /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b(:\d{1,5})?([/?#][^\s<>"']*)?/gi;
 
-function hosts(_: string, host: string, rest = ''): string {
+function hosts(_: string, host: string, port = '', rest = ''): string {
   const domain = parse(host, { allowPrivateDomains: true });
   if (
     domain.isIcann ||
     domain.isPrivate ||
     /\.(?:internal|local|localhost|test|invalid)$/i.test(host)
   )
-    return rest ? '[url]' : '[host]';
-  return host + rest.replace(hostPattern, hosts);
+    return rest ? '[url]' : `[host]${port}`;
+  return host + port + rest.replace(hostPattern, hosts);
 }
 
 function normalize(key: string) {

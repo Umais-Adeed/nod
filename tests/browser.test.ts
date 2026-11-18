@@ -2864,6 +2864,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Book a slot at calendly.com/synthetic-booker/30min please.',
     'Profile www.example.com/in/synthetic-profile?ref=private-ref#private-anchor failed.',
     'Redirect via unlisted.notatld/next?to=example.com/synthetic-hidden failed.',
+    'Mirror downloads.example.com:8443/synthetic-mirror?key=synthetic-query failed.',
     { type: 'image', data: 'synthetic-private-image' },
     {
       content: [
@@ -2919,6 +2920,8 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'private-ref',
     'private-anchor',
     'synthetic-hidden',
+    'synthetic-mirror',
+    'synthetic-query',
     'fixture',
     'marta.vidal',
     '00000000-1111',
