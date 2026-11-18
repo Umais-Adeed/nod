@@ -29,7 +29,7 @@ export function appRequestUrl(endpoint: string, relative: string) {
   } catch {
     throw new Error('The API path has an invalid % escape.');
   }
-  if (leavesPath(url.pathname))
+  if (leavesPath(relative.split('?')[0]) || leavesPath(url.pathname))
     throw new Error(
       'The request must stay in the saved API address, so its path cannot contain a . or .. segment or a backslash, even percent-encoded.',
     );
