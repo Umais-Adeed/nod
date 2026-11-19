@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
 import path, { join, win32 } from 'node:path';
@@ -21,7 +21,11 @@ import {
   ModelRuntime,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
+import {
+  calculateCost,
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+} from '@earendil-works/pi-ai';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai/providers/faux';
 import {
   appConfirmation,
@@ -116,6 +120,7 @@ test('models and routers complete tool discovery inside the endpoint context', a
     { provider: 'compatible', id: 'fixture-mcp', window: 8192, limit: 8192 },
     { provider: 'compatible', id: 'fixture-mcp-large', window: 131_072, limit: 131_072 },
     { provider: 'compatible', id: 'fixture-followup', window: 8192, limit: 8192 },
+    { provider: 'compatible', id: 'fixture-background', window: 8192, limit: 8192 },
   ] as const)
     await t.test(id, async (test) => {
       const directory = await mkdtemp(join(tmpdir(), 'nod-small-context-'));
@@ -197,8 +202,12 @@ test('models and routers complete tool discovery inside the endpoint context', a
                   name: id.startsWith('fixture-mcp') ? 'mcp__fixture' : 'artifacts',
                 },
               ],
-              ['nod_tool_search', { query: 'share_file', limit: 1 }],
-              ['share_file', { path: 'report.txt' }],
+              ...(id === 'fixture-background'
+                ? ([['send_message', { text: 'Synthetic scheduled result.' }]] as const)
+                : ([
+                    ['nod_tool_search', { query: 'share_file', limit: 1 }],
+                    ['share_file', { path: 'report.txt' }],
+                  ] as const)),
             ] as const);
       const serve = async (url: RequestInfo | URL, init?: RequestInit) => {
         assert.equal(String(url), `${access.definition.spec.baseUrl}/chat/completions`);
@@ -263,6 +272,11 @@ test('models and routers complete tool discovery inside the endpoint context', a
             assert.ok(JSON.stringify(body).includes('Synthetic retained recent turn.'));
           }
         }
+        if (!summarizing)
+          assert.ok(
+            body.tools.some((tool: any) => tool.function.name === 'apps'),
+            'Connected apps are unreachable without the apps tool.',
+          );
         const call = summarizing ? undefined : calls[requests++];
         if (call) assert.ok(body.tools.some((tool: any) => tool.function.name === call[0]));
         const chunk = {
@@ -306,6 +320,7 @@ test('models and routers complete tool discovery inside the endpoint context', a
       };
       let fetchMocked = false;
       const published: Buffer[] = [];
+      const delivered: string[] = [];
       const failures: unknown[] = [];
       const started: string[] = [];
       const runtime = createAgentRuntime({
@@ -342,6 +357,8 @@ test('models and routers complete tool discovery inside the endpoint context', a
         turnId: randomUUID(),
         prompt: 'Return the text report named report.txt.',
         rules: 'Do not contact anyone.',
+        ...(id === 'fixture-background' ? { background: true } : {}),
+        reply: async (text) => void delivered.push(text),
         memory: 'Synthetic earlier memory. '.repeat(2000),
         ...(['fixture-memory-small', 'fixture-docs-small'].includes(id)
           ? {
@@ -433,10 +450,14 @@ test('models and routers complete tool discovery inside the endpoint context', a
         started,
         id === 'fixture-docs-small'
           ? ['tool_search', 'nod_docs', 'nod_docs', 'tool_search', 'share_file']
-          : ['tool_search', 'skills', 'tool_search', 'share_file'],
+          : id === 'fixture-background'
+            ? ['tool_search', 'skills', 'send_message']
+            : ['tool_search', 'skills', 'tool_search', 'share_file'],
       );
-      assert.equal(published.length, 1);
-      assert.equal(published[0].toString(), 'Synthetic report bytes');
+      const files = id === 'fixture-background' ? 0 : 1;
+      assert.equal(published.length, files);
+      if (files) assert.equal(published[0].toString(), 'Synthetic report bytes');
+      else assert.deepEqual(delivered, ['Synthetic scheduled result.']);
       if (id === 'fixture-resumed')
         assert.ok((await localText(join(directory, 'sessions/fixture'))).includes(earlier));
       if (!['fixture-large', 'fixture-mcp-large'].includes(id)) {
@@ -452,7 +473,7 @@ test('models and routers complete tool discovery inside the endpoint context', a
           'succeeded',
         );
         assert.ok(bodies.length > before);
-        assert.equal(published.length, 1);
+        assert.equal(published.length, files);
       }
     });
 });
@@ -595,6 +616,88 @@ test('wide output models reserve room for request input', async (t) => {
   assert.equal(result.stopReason, 'stop');
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].max_tokens, 50_000);
+});
+
+test('wide OpenRouter requests bound completion reservations without dropping input', async () => {
+  const id = 'fixture/wide-output';
+  const [discovered] = await createPiModelBackend({
+    fetch: async (url) =>
+      String(url).endsWith('/key')
+        ? Response.json({ data: {} })
+        : Response.json({
+            data: [
+              {
+                id,
+                name: 'Synthetic wide output model',
+                context_length: 1_048_576,
+                top_provider: { max_completion_tokens: 524_288 },
+                supported_parameters: ['tools', 'reasoning'],
+                reasoning: { supported_efforts: ['none', 'high'] },
+                architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+                pricing: { prompt: '0.000001', completion: '0.000001' },
+              },
+            ],
+          }),
+  }).catalog('openrouter', 'api_key', { type: 'api_key', key: 'fixture-wide-key' });
+  assert.ok(discovered);
+  for (const maximum of [524_288, 8192]) {
+    const access = smallContextAccess('openrouter', id, 1_048_576);
+    access.definition = JSON.parse(JSON.stringify(discovered));
+    access.definition.spec.maxTokens = maximum;
+    const { runtime, model } = await createPiModelRuntime(access);
+    const earlier = 'Synthetic earlier conversation. '.repeat(5000);
+    const messages: Context['messages'] = [
+      { role: 'user', content: earlier, timestamp: 1 },
+      { role: 'user', content: 'Return a short synthetic report.', timestamp: 2 },
+    ];
+    const bodies: Record<string, any>[] = [];
+    for (const maxTokens of [65_000, undefined, 512, 1]) {
+      const result = await runtime.completeSimple(
+        model,
+        { systemPrompt: 'Keep the synthetic owner instruction.', messages },
+        {
+          maxTokens,
+          reasoning: 'high',
+          maxRetries: 0,
+          fetch: async (_input, init) => {
+            const body = JSON.parse(String(init?.body));
+            bodies.push(body);
+            assert.ok((body.max_tokens ?? body.max_completion_tokens) <= maximum);
+            if ((body.max_tokens ?? body.max_completion_tokens) > 60_000)
+              return Response.json(
+                {
+                  error: {
+                    message: 'Synthetic credit limit: completion reservation is too large.',
+                  },
+                },
+                { status: 402 },
+              );
+            return new Response(
+              `data: ${JSON.stringify({
+                id: 'fixture-wide-answer',
+                choices: [
+                  { index: 0, delta: { content: 'Synthetic report.' }, finish_reason: 'stop' },
+                ],
+              })}\n\ndata: [DONE]\n\n`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          },
+        },
+      );
+      assert.equal(result.stopReason, 'stop', result.errorMessage);
+    }
+    assert.equal(bodies.length, 4);
+    assert.deepEqual(
+      bodies.map((body) => body.max_tokens ?? body.max_completion_tokens),
+      [model.maxTokens, model.maxTokens, 512, 1],
+    );
+    assert.equal(model.contextWindow, 1_048_576);
+    for (const body of bodies) {
+      assert.equal(body.reasoning.effort, 'high');
+      assert.ok(body.messages.some((message: any) => message.content === earlier));
+      assert.ok(JSON.stringify(body).includes('Keep the synthetic owner instruction.'));
+    }
+  }
 });
 
 test('streamed content part arrays reach the answer as text', async (t) => {
@@ -1083,12 +1186,14 @@ test('a context restart drops old model input once and keeps later turns through
   t.after(() => f.close());
   const sessionRoot = join(f.directory, 'sessions');
   const requests: string[] = [];
+  let manager: SessionManager | undefined;
   const agent = createPiAgent({
     provider: 'openai',
     apiKey: 'fixture',
     sessionRoot,
     createSession: async (options) => {
       const result = await createAgentSession(options);
+      manager = result.session.sessionManager;
       result.session.agent.streamFunction = (model, context) => {
         requests.push(JSON.stringify(context.messages));
         const message = {
@@ -1128,14 +1233,23 @@ test('a context restart drops old model input once and keeps later turns through
   assert.doesNotMatch(requests.at(-1)!, /old context that must not return/);
   assert.match(requests.at(-1)!, /Synthetic saved preferences/);
   const saved = join(sessionRoot, f.threadId);
-  const manager = SessionManager.continueRecent(saved, saved);
+  assert.ok(manager);
   manager.appendCustomEntry('synthetic-padding', { value: 'x'.repeat(8 * 1024 * 1024) });
   for (const prompt of ['Synthetic request after rebase.', 'Synthetic next follow-up.']) {
+    const active = manager.getSessionFile();
+    assert.ok(active);
+    for (const name of await readdir(saved)) {
+      const path = join(saved, name);
+      if (name.endsWith('.jsonl') && path !== active)
+        await utimes(path, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
+    }
     const followUp = await open(marker);
     assert.equal(followUp.resumed, true);
     await followUp.prompt(prompt, []);
     await followUp.dispose();
     assert.match(requests.at(-1)!, /Synthetic request after restart/);
+    if (prompt === 'Synthetic next follow-up.')
+      assert.match(requests.at(-1)!, /Synthetic request after rebase/);
     assert.doesNotMatch(requests.at(-1)!, /old context that must not return/);
   }
   assert.match(await localText(saved), /old context that must not return/);
@@ -2121,10 +2235,22 @@ async function hostSandbox(t: test.TestContext) {
     exec(command: string, options: WorkspaceExecOptions = {}) {
       calls.push(command);
       return new Promise((resolve) => {
-        const child = spawn('bash', ['-c', command.replaceAll(prefix, root)], {
-          cwd,
-          env: { PATH: `${bin}:/usr/bin:/bin` },
-        });
+        const child = spawn(
+          'bash',
+          [
+            '-c',
+            command
+              .replaceAll(prefix, root)
+              .replaceAll(
+                '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                `${bin}:/usr/bin:/bin`,
+              ),
+          ],
+          {
+            cwd,
+            env: { PATH: `${bin}:/usr/bin:/bin` },
+          },
+        );
         const deliver = (chunk: Buffer) =>
           options.onData?.(
             chunk.includes(root)
@@ -2345,6 +2471,7 @@ function context(directory: string): RuntimeContext {
       url: '/api/artifacts/fixture',
     }),
     requestCredential: async () => ({ filled: true }),
+    checkWorkspaceCommand: async () => ({ record: async () => {} }),
     integration: async () => ({}),
     manage: async () => ({}),
   };
@@ -3058,6 +3185,68 @@ test('trust mode selects available Jev, Decider and OpenAI before the small LLM'
     );
 });
 
+test('checked workspace command arguments and both cancellation signals reach the native executor', async (t) => {
+  for (const cancel of ['original', 'checked'] as const)
+    await t.test(cancel, async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'nod-command-dispatch-'));
+      const command = { command: 'printf synthetic-checked-command' };
+      const checked = new AbortController();
+      const original = new AbortController();
+      const scripts: string[] = [];
+      const signals: Array<AbortSignal | undefined> = [];
+      let definition: ToolDefinition | undefined;
+      const agent = createPiAgent({
+        provider: 'openai',
+        apiKey: 'fixture-key',
+        sessionRoot: join(directory, 'sessions'),
+        createSession: async (options) => {
+          definition = options!.customTools!.find((tool) => tool.name === 'bash');
+          return createAgentSession(options);
+        },
+      });
+      try {
+        await agent.open({
+          ...fakeExecution(randomUUID(), randomUUID()),
+          systemPrompt: 'Synthetic checked command fixture',
+          workspace: {
+            path: '/synthetic-workspace',
+            instructions: 'Synthetic workspace',
+            exec: async (script, options) => {
+              scripts.push(script);
+              signals.push(options?.signal);
+              return { exitCode: 0 };
+            },
+          },
+          runTool: async (name, args, run) => {
+            assert.equal(name, 'bash');
+            assert.equal((args as typeof command).command, 'printf synthetic-checked-command');
+            command.command = 'printf synthetic-unchecked-change';
+            return run(checked.signal);
+          },
+          tools: [],
+          shouldStop: () => false,
+          onEvent() {},
+        });
+        await definition!.execute(
+          'synthetic-checked-command',
+          command,
+          original.signal,
+          undefined,
+          {} as never,
+        );
+        assert.equal(scripts.length, 1);
+        assert.ok(scripts[0].includes('printf synthetic-checked-command'));
+        assert.equal(scripts[0].includes('synthetic-unchecked-change'), false);
+        assert.equal(signals[0]?.aborted, false);
+        (cancel === 'original' ? original : checked).abort();
+        assert.equal(signals[0]?.aborted, true);
+      } finally {
+        await agent.dispose();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+});
+
 test('codemode heldout output preserves UTF-8 bytes and fails closed through the guard', async (t) => {
   const expected =
     Array.from(
@@ -3107,11 +3296,11 @@ test('codemode heldout output preserves UTF-8 bytes and fails closed through the
             exec: async (script, options) => {
               workspaceCommands += 1;
               if ((await spills()).length) observedSpill = true;
-              if (script.startsWith('base64 -d ')) {
+              if (/^base64 -d /m.test(script)) {
                 transferAttempts += 1;
                 if (mode === 'transfer-cleanup-failed') return { exitCode: 73 };
               }
-              if (script.startsWith('rm -f --')) {
+              if (/^rm -f --/m.test(script)) {
                 cleanupAttempts += 1;
                 if (mode === 'transfer-cleanup-failed')
                   throw new Error('Synthetic workspace cleanup failure.');
@@ -3903,6 +4092,92 @@ test('each model call yields one chat-format trace without image data', async ()
     undefined,
   );
   assert.ok(!JSON.stringify(trace).includes(image));
+  assert.equal(trace.metadata.error_type, undefined);
+  for (const [error, expected, phase = 'response'] of [
+    ['Your credit balance is too low. (HTTP 400)', 'billing'],
+    ['Insufficient credits. (HTTP 402)', 'billing'],
+    ['You need a positive balance. (HTTP 402)', 'billing'],
+    ['You need a positive balance to use this model.', 'billing'],
+    ['401 The API key is invalid or expired.', 'auth'],
+    ['The provider refused the credential. (HTTP 401)', 'auth'],
+    ['Incorrect API key provided.', 'auth'],
+    ['The access token has expired.', 'auth'],
+    ['API key not valid. Please pass a valid API key.', 'auth'],
+    ['The model is under high demand. (HTTP 503)', 'provider_unavailable'],
+    ['Upstream said HTTP 401. The proxy refused the call. (HTTP 503)', 'provider_unavailable'],
+    ['An earlier call returned HTTP 402. This call failed. (HTTP 429)', 'rate_limit'],
+    ['Quota exceeded. (HTTP 402)', 'billing'],
+    ['503 Service unavailable.', 'provider_unavailable'],
+    ['The model is currently experiencing high demand.', 'provider_unavailable'],
+    ['overloaded_error: The service is overloaded.', 'provider_unavailable'],
+    ['terminated', 'connection'],
+    ['TypeError: terminated (HTTP 200) [request phase: stream]', 'connection'],
+    [
+      'terminated (HTTP 200) (transport cause: UND_ERR_SOCKET) [request phase: stream]',
+      'connection',
+    ],
+    ['The response stream terminated before completion.', 'connection'],
+    ['The connection has been terminated.', 'connection'],
+    ['The account was terminated.', 'unknown'],
+    ['The subscription was terminated.', 'unknown'],
+    ['You have hit your rate limit.', 'rate_limit'],
+    ['The subscription rate limit was reached.', 'rate_limit'],
+    ['You have hit your usage limit for tokens per minute.', 'rate_limit'],
+    ["You've hit your tokens per minute limit.", 'rate_limit'],
+    ["You've hit your usage limit (Plus plan). Try again later.", 'quota'],
+    ['usage_limit_reached: ChatGPT subscription usage limit reached.', 'quota'],
+    ['Prepayment credits are depleted.', 'billing'],
+    ['429 {"error":{"details":[{"quotaValue":"0"}]}}', 'quota'],
+    ['Quota exceeded. Check billing details. (HTTP 429)', 'quota'],
+    ['Quota exceeded. See billing docs for quota limits. (HTTP 429)', 'quota'],
+    ['Quota exceeded: GenerateRequestsPerDayPerProjectPerModel-FreeTier (HTTP 429)', 'quota'],
+    ['Rate limit exceeded: tokens per minute. (HTTP 429)', 'rate_limit'],
+    ['Quota exceeded for tokens per minute. (HTTP 429)', 'rate_limit'],
+    ['Too many requests. (HTTP 429)', 'rate_limit'],
+    ['fetch failed (transport cause: ECONNRESET)', 'connection'],
+    ['The request timed out.', 'connection'],
+    ['The daily report endpoint timed out.', 'connection'],
+    ['The per-day endpoint returned too many requests. (HTTP 429)', 'rate_limit'],
+    ['The free-tier model connection failed.', 'connection'],
+    ['Unknown parameter: daily.', 'unknown'],
+    [
+      'Automatic preparation stopped because this model has no cost estimate.',
+      'model_config',
+      'prepare',
+    ],
+    ['The selected model connection is unavailable.', 'model_config', 'prepare'],
+    ['The provider gave no reason. (HTTP 402)', 'billing'],
+    ['The request contains 401 tokens.', 'unknown'],
+    ['The request contains 402 tokens.', 'unknown'],
+    ['Synthetic provider error.', 'unknown'],
+  ] as const) {
+    const failed = piModelTrace(
+      {
+        ...calls[0],
+        request: { requestPhase: phase, requestKind: 'regular' },
+        message: { ...calls[0].message, stopReason: 'error', errorMessage: error },
+      },
+      {},
+    );
+    assert.equal(failed.metadata.error_type, expected, error);
+    assert.equal(failed.error, error);
+  }
+  for (const errorMessage of [
+    undefined,
+    'Request aborted by the owner.',
+    'terminated (HTTP 503)',
+  ]) {
+    const cancelled = piModelTrace(
+      {
+        ...calls[0],
+        message: { ...calls[0].message, stopReason: 'aborted', errorMessage },
+      },
+      {},
+    );
+    assert.equal(cancelled.metadata.error_type, 'aborted');
+    assert.equal(cancelled.metadata.stop_reason, 'aborted');
+    assert.equal(cancelled.error, errorMessage ?? 'aborted');
+  }
   const { untrustedBlock } = await import('../src/shared/untrusted.ts');
   const result = (toolCallId: string, toolName: string, text: string) => ({
     role: 'toolResult' as const,
@@ -4032,6 +4307,230 @@ test('each model call yields one chat-format trace without image data', async ()
     assert.ok(!JSON.stringify(selectedTrace).includes(privateFact));
     assert.ok(JSON.stringify(selectedTrace).includes(selectedContext.prompt));
   }
+});
+
+test('agent and curator traces share analytics IDs across parallel turns and separate consent switches', async (t) => {
+  const { createAnalytics } = await import('../src/server/analytics.ts');
+  const { createModelTraces } = await import('../src/server/traces.ts');
+  const { createN8nTraces } = await import('../src/providers/n8n/traces.ts');
+  const { piModelTrace } = await import('../src/providers/pi/traces.ts');
+  type PiModelCall = import('../src/providers/pi/traces.ts').PiModelCall;
+  const sent: Array<{
+    run: {
+      metadata: Record<string, string | number>;
+      error?: string;
+      usage: { total_cost?: number };
+    };
+  }> = [];
+  const events: Parameters<import('../src/ports/analytics.ts').ProductAnalytics['capture']>[0][] =
+    [];
+  const root = await mkdtemp(join(tmpdir(), 'nod-trace-identity-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const analytics = await createAnalytics({
+    provider: { capture: (event) => events.push(event), shutdown: async () => {} },
+    environment: 'production',
+    dataRoot: root,
+    withTraceContext: (operation) => {
+      const turnId = randomUUID();
+      return traces.withTurn({ sessionId: turnId, turnId }, operation);
+    },
+  });
+  t.after(() => analytics.shutdown());
+  const traces = createModelTraces(
+    createN8nTraces({
+      url: 'https://traces.example.test/',
+      token: 'synthetic-trace-token',
+      request: async (_url, request) => {
+        sent.push(JSON.parse(String(request?.body)));
+        return new Response(null, { status: 202 });
+      },
+    }),
+    '0.9.0',
+  );
+  traces.configure({
+    enabled: true,
+    userId: analytics.distinctId,
+    profile: async () => ({ names: ['Marta Vidal'] }),
+  });
+  const model = { id: 'fixture-model', provider: 'fixture' } as PiModelCall['model'];
+  const message = {
+    ...fauxAssistantMessage('{"ok":true}'),
+    usage: {
+      input: 10,
+      output: 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 12,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+    },
+  };
+  const call = (): PiModelCall => ({
+    model,
+    context: { messages: [] },
+    message,
+    startedAt: new Date().toISOString(),
+  });
+  const curator = createPiMemoryCurator({
+    provider: 'fixture',
+    model: model.id,
+    apiKey: 'synthetic-key',
+    traces,
+    runtime: {
+      setRuntimeApiKey: async () => {},
+      getModel: () => model,
+      completeSimple: async () => message,
+    } as never,
+  });
+  const sessionId = randomUUID();
+  const turns = ['user', 'schedule', 'event', 'resume', 'task'] as const;
+  analytics.setUsageData('synthetic-owner', true);
+  await Promise.all(
+    turns.map(async (source) => {
+      const turnId = randomUUID();
+      await traces.withTurn({ sessionId, turnId }, (ids) =>
+        analytics.withRun(
+          'synthetic-owner',
+          async () => {
+            await Promise.resolve();
+            traces.record(
+              piModelTrace(call(), { source: 'agent', turn_id: turnId, run_id: randomUUID() }),
+            );
+            traces.record(
+              piModelTrace(call(), {
+                source: 'agent',
+                parent_run_id: randomUUID(),
+                run_id: randomUUID(),
+              }),
+            );
+            await analytics.withSystemWork('synthetic-owner', 'onboarding', () =>
+              curator.curate({
+                task: 'plan',
+                instructions: 'Return JSON.',
+                input: {},
+                automatic: source !== 'user',
+              }),
+            );
+            analytics.capture('synthetic-owner', {
+              event: 'turn_started',
+              properties: {
+                source,
+                channel: 'web',
+                background: source !== 'user',
+                work_type:
+                  source === 'schedule'
+                    ? 'scheduled'
+                    : source === 'user'
+                      ? 'immediate'
+                      : 'background',
+                owner_requested: source === 'user',
+              },
+            });
+          },
+          ids,
+        ),
+      );
+    }),
+  );
+  const settle = async (count: number) => {
+    for (let attempt = 0; attempt < 100 && sent.length < count; attempt++) await setTimeout(5);
+    assert.equal(sent.length, count);
+  };
+  await settle(15);
+  assert.equal(events.length, 5);
+  assert.equal(new Set(events.map((event) => event.properties.turn_id)).size, 5);
+  assert.equal(new Set(sent.map(({ run }) => run.metadata.thread_id)).size, 1);
+  assert.equal(new Set(sent.map(({ run }) => run.metadata.turn_id)).size, 5);
+  for (const event of events) {
+    const runs = sent.filter(({ run }) => run.metadata.turn_id === event.properties.turn_id);
+    assert.equal(runs.length, 3);
+    assert.equal(runs.filter(({ run }) => run.metadata.source === 'curator').length, 1);
+    assert.equal(runs.filter(({ run }) => run.metadata.source === 'agent').length, 2);
+    for (const { run } of runs) {
+      assert.equal(run.metadata.user_id, event.distinctId);
+      assert.equal(run.metadata.thread_id, event.properties.thread_id);
+      assert.equal(run.metadata.cost_usd, 0.03);
+      assert.equal(run.usage.total_cost, 0.03);
+      assert.equal(run.metadata.session_id, undefined);
+    }
+  }
+  assert.ok(!JSON.stringify(sent).includes(sessionId));
+  await Promise.all(
+    [0, 1].map(() =>
+      analytics.withSystemWork('synthetic-owner', 'onboarding', () =>
+        curator.curate(
+          { task: 'plan', instructions: 'Return JSON.', input: {} },
+          undefined,
+          (usage) =>
+            analytics.capture('synthetic-owner', {
+              event: 'model_used',
+              properties: {
+                provider: 'other',
+                purpose: 'tasks',
+                request_kind: 'tasks',
+                outcome: 'succeeded',
+                input_tokens: usage.inputTokens ?? 0,
+                output_tokens: usage.outputTokens ?? 0,
+                pricing: 'api',
+                cost_usd: usage.costUsd ?? undefined,
+              },
+            }),
+        ),
+      ),
+    ),
+  );
+  await settle(17);
+  assert.equal(events.length, 7);
+  const systemEvents = events.slice(5);
+  assert.equal(new Set(systemEvents.map((event) => event.properties.turn_id)).size, 2);
+  for (const event of systemEvents) {
+    const runs = sent.filter(({ run }) => run.metadata.turn_id === event.properties.turn_id);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].run.metadata.source, 'curator');
+    assert.equal(runs[0].run.metadata.thread_id, event.properties.thread_id);
+    assert.equal(runs[0].run.metadata.user_id, event.distinctId);
+    assert.equal(event.properties.system_activity, 'onboarding');
+    assert.equal(event.properties.run_id, undefined);
+  }
+  analytics.setUsageData('synthetic-owner', false);
+  await curator.curate({ task: 'brief', instructions: 'Return JSON.', input: {} });
+  await settle(18);
+  assert.equal(sent.at(-1)!.run.metadata.user_id, analytics.distinctId);
+  assert.match(String(sent.at(-1)!.run.metadata.thread_id), /^[0-9a-f]{32}$/);
+  assert.match(String(sent.at(-1)!.run.metadata.turn_id), /^[0-9a-f]{32}$/);
+  assert.equal(events.length, 7);
+  const failed = piModelTrace(
+    {
+      ...call(),
+      message: {
+        ...message,
+        stopReason: 'error',
+        errorMessage:
+          'Marta Vidal <marta@example.com>: quota exceeded. Token synthetic-private-key.',
+      },
+    },
+    {},
+  );
+  traces.configure({ secrets: ['synthetic-private-key'] });
+  traces.record(failed);
+  await settle(19);
+  assert.doesNotMatch(
+    sent.at(-1)!.run.error!,
+    /Marta|Vidal|marta@example.com|synthetic-private-key/,
+  );
+  for (const cost of [0, null]) {
+    traces.record({ ...piModelTrace(call(), {}), usage: { ...failed.usage, costUsd: cost } });
+    await settle(cost === 0 ? 20 : 21);
+    assert.equal(sent.at(-1)!.run.metadata.cost_usd, cost ?? undefined);
+    assert.equal(sent.at(-1)!.run.usage.total_cost, cost ?? undefined);
+  }
+  traces.configure({ enabled: false });
+  traces.record(piModelTrace(call(), {}));
+  await setTimeout(10);
+  assert.equal(sent.length, 21);
+  const standalone = await createAnalytics({ environment: 'production', dataRoot: root });
+  assert.equal(standalone.distinctId, analytics.distinctId);
+  assert.equal(standalone.configuration('synthetic-owner').enabled, false);
+  await standalone.shutdown();
 });
 
 test('a long tool call does not send model requests without usage records', async (t) => {
@@ -7373,15 +7872,17 @@ test('native OpenAI model discovery and requests keep each connection in its reg
       assert.equal(new Headers(init?.headers).get('authorization'), `Bearer fixture-${region}`);
       assert.equal(init?.redirect, 'error');
       return Response.json({
-        data: ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-audio-1.5'].map((id) => ({ id })),
+        data: ['gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-luna', 'gpt-audio-1.5'].map(
+          (id) => ({ id }),
+        ),
       });
     },
   });
   await Promise.all(
-    (['global', 'eu', 'us'] as const).map(async (region) => {
+    (['global', 'eu', 'us', 'jp'] as const).map(async (region) => {
       const credential = modelKeyCredential('openai', `fixture-${region}`, { region });
       const definitions = await backend.catalog('openai', 'api_key', credential);
-      assert.equal(definitions.length, 3);
+      assert.equal(definitions.length, 5);
       for (const definition of definitions) {
         assert.equal(definition.spec.baseUrl, openAIBaseUrl(region));
         assert.equal(definition.spec.provider, 'openai');
@@ -7396,6 +7897,23 @@ test('native OpenAI model discovery and requests keep each connection in its reg
           effort: audio ? 'off' : 'low',
           read: async () => credential,
         });
+        if (definition.choice.id.startsWith('gpt-6.2-')) {
+          for (const input of [100_000, 300_000]) {
+            const usage = {
+              input,
+              output: 1000,
+              cacheRead: 10_000,
+              cacheWrite: 1000,
+              totalTokens: input + 12_000,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            };
+            calculateCost(model, usage);
+            const standard = input === 100_000 ? 0.2135 : 1.222;
+            const family = definition.choice.id === 'gpt-6.2-astra' ? 4 : 1;
+            const expected = standard * family * (region === 'global' ? 1 : 1.1);
+            assert.ok(Math.abs(usage.cost.total - expected) < 1e-10);
+          }
+        }
         let calls = 0;
         const result = await runtime.completeSimple(
           model,
@@ -7423,6 +7941,80 @@ test('native OpenAI model discovery and requests keep each connection in its reg
       }
     }),
   );
+});
+
+test('ChatGPT discovery preserves account visibility and reasoning controls through requests', async () => {
+  const credential = chatgptFixtureCredential();
+  let hidden = false;
+  let listed = true;
+  const backend = createPiModelBackend({
+    fetch: async (input, init) => {
+      assert.equal(String(input), 'https://api.openai.com/v1/models');
+      assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${credential.access}`);
+      return Response.json({
+        models: listed
+          ? [
+              { slug: 'gpt-6.2-sol', visibility: hidden ? 'hide' : 'list' },
+              { id: 'gpt-6.2-astra' },
+              { slug: 'gpt-6-astra', visibility: 'list' },
+              { slug: 'gpt-6-luna', visibility: 'hide' },
+              { slug: 'fixture-unsupported-model', visibility: 'list' },
+            ]
+          : [],
+      });
+    },
+  });
+  const definitions = await backend.catalog('openai', 'subscription', credential);
+  assert.deepEqual(definitions.map(({ choice }) => choice.id).sort(), [
+    'gpt-6-astra',
+    'gpt-6.2-astra',
+    'gpt-6.2-sol',
+  ]);
+  for (const definition of definitions) {
+    const { runtime, model } = await createPiModelRuntime({
+      provider: 'openai',
+      method: 'subscription',
+      definition,
+      effort: 'low',
+      read: async () => credential,
+    });
+    for (const reasoning of definition.choice.efforts) {
+      assert.ok(reasoning !== 'off');
+      let calls = 0;
+      const result = await runtime.completeSimple(
+        model,
+        { messages: [{ role: 'user', content: 'Synthetic request.', timestamp: 1 }] },
+        {
+          reasoning,
+          fetch: async (input, init) => {
+            calls++;
+            assert.equal(String(input), 'https://api.openai.com/v1/responses');
+            assert.equal(
+              new Headers(init?.headers).get('authorization'),
+              `Bearer ${credential.access}`,
+            );
+            const body = JSON.parse(String(init?.body));
+            assert.equal(body.model, definition.choice.id);
+            assert.equal(body.reasoning.effort, reasoning);
+            assert.notEqual(body.reasoning.effort, 'none');
+            return Response.json({ error: { message: 'Synthetic refusal' } }, { status: 400 });
+          },
+        },
+      );
+      assert.equal(calls, 1);
+      assert.equal(result.stopReason, 'error');
+      assert.match(result.errorMessage!, /Synthetic refusal/);
+    }
+  }
+  hidden = true;
+  assert.deepEqual(
+    (await backend.catalog('openai', 'subscription', credential))
+      .map(({ choice }) => choice.id)
+      .sort(),
+    ['gpt-6-astra', 'gpt-6.2-astra'],
+  );
+  listed = false;
+  assert.deepEqual(await backend.catalog('openai', 'subscription', credential), []);
 });
 
 test('OpenAI discovery keeps the provider reason and only permits the model-list scope exception', async () => {
@@ -7460,9 +8052,14 @@ test('OpenAI discovery keeps the provider reason and only permits the model-list
         Response.json({ error: { message: `Missing scopes: ${scopes}` } }, { status: 403 }),
     });
     const models = backend.catalog('openai', 'api_key', { type: 'api_key', key, region: 'eu' });
-    if (scopes === 'api.model.read')
-      assert.ok((await models).every(({ spec }) => spec.baseUrl === openAIBaseUrl('eu')));
-    else await assert.rejects(models, /api.responses.write/);
+    if (scopes === 'api.model.read') {
+      const fallback = await models;
+      assert.ok(fallback.every(({ spec }) => spec.baseUrl === openAIBaseUrl('eu')));
+      assert.deepEqual(
+        fallback.map(({ choice }) => choice.id),
+        (await backend.catalog('openai', 'api_key')).map(({ choice }) => choice.id),
+      );
+    } else await assert.rejects(models, /api.responses.write/);
   }
   let cancelled = false;
   const failure = await openAIRequestError(
@@ -9048,6 +9645,149 @@ test('task and batch classification have a small request budget and never retrie
       });
 });
 
+test('turn-bound reviews and memory writes can finish slowly and still stop before completion', async (t) => {
+  const clock = t.mock.timers;
+  t.mock.method(AbortSignal, 'timeout', (milliseconds: number) => {
+    const deadline = new AbortController();
+    globalThis
+      .setTimeout(
+        () => deadline.abort(new DOMException('The request timed out.', 'TimeoutError')),
+        milliseconds,
+      )
+      .unref?.();
+    return deadline.signal;
+  });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const provider of ['compatible', 'openai'] as const)
+    for (const task of ['review', 'access', 'skill', 'remember'] as const)
+      for (const stopped of [false, true, undefined])
+        await t.test(
+          `${provider} ${task} ${stopped === undefined ? 'without a signal' : stopped ? 'stopped' : 'completed'}`,
+          async (t) => {
+            const access = smallContextAccess('compatible', 'fixture-slow-review', 128000);
+            access.provider = provider;
+            access.definition.spec = { ...access.definition.spec, provider };
+            access.read = async () => ({ type: 'api_key', key: 'fixture-review-key' });
+            let sent!: () => void;
+            const requested = new Promise<void>((resolve) => (sent = resolve));
+            let finish!: () => void;
+            let calls = 0;
+            t.mock.method(
+              globalThis,
+              'fetch',
+              async (_url: RequestInfo | URL, init?: RequestInit) => {
+                calls++;
+                await new Promise<void>((resolve, reject) => {
+                  finish = resolve;
+                  const abort = () => reject(new DOMException('Owner stopped.', 'AbortError'));
+                  if (init?.signal?.aborted) abort();
+                  else init?.signal?.addEventListener('abort', abort, { once: true });
+                  sent();
+                });
+                return new Response(
+                  `data: ${JSON.stringify({
+                    id: 'fixture-review',
+                    choices: [
+                      { index: 0, delta: { content: '{"allowed":true}' }, finish_reason: 'stop' },
+                    ],
+                    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+                  })}\n\ndata: [DONE]\n\n`,
+                  { headers: { 'content-type': 'text/event-stream' } },
+                );
+              },
+            );
+            const curator = createPiMemoryCurator({
+              provider,
+              configured: () => true,
+              resolve: async () => access,
+            });
+            const stop = new AbortController();
+            const reports: Array<Partial<ProviderUsageEvent>> = [];
+            const result = curator.curate(
+              { task, instructions: 'Check the synthetic action.', input: {} },
+              stopped === undefined ? undefined : stop.signal,
+              (usage) => reports.push(usage),
+            );
+            const checked =
+              stopped !== false
+                ? assert.rejects(result)
+                : result.then((value) => assert.deepEqual(value, { allowed: true }));
+            await requested;
+            clock.tick(
+              stopped === undefined ? 45_000 : provider === 'compatible' ? 11 * 60_000 : 60_000,
+            );
+            if (stopped) stop.abort();
+            finish();
+            await checked;
+            assert.equal(calls, 1);
+            assert.deepEqual(
+              reports.map(({ status }) => status),
+              [stopped === false ? 'succeeded' : 'cancelled'],
+            );
+          },
+        );
+});
+
+test('turn-bound review and memory timeouts retain their cause while Stop ends retry backoff', async (t) => {
+  const { setImmediate } = await import('node:timers/promises');
+  const { modelFirstEventMs } = await import('../src/providers/pi/models.ts');
+  for (const task of ['review', 'skill', 'remember'] as const)
+    for (const stopped of [false, true])
+      await t.test(
+        `${task} ${stopped ? 'stopped in backoff' : 'provider timed out'}`,
+        async (t) => {
+          const access = smallContextAccess('compatible', 'fixture-timeout-review', 128000);
+          access.provider = 'openai';
+          access.definition.spec = { ...access.definition.spec, provider: 'openai' };
+          access.read = async () => ({ type: 'api_key', key: 'fixture-review-key' });
+          t.mock.timers.enable({ apis: ['setTimeout'] });
+          const reports: Array<Partial<ProviderUsageEvent>> = [];
+          let calls = 0;
+          let sent = () => {};
+          t.mock.method(globalThis, 'fetch', (_url: RequestInfo | URL, init?: RequestInit) => {
+            calls++;
+            const result = new Promise<Response>((_resolve, reject) => {
+              const abort = () => reject(new DOMException('Synthetic abort.', 'AbortError'));
+              if (init?.signal?.aborted) abort();
+              else init?.signal?.addEventListener('abort', abort, { once: true });
+            });
+            sent();
+            return result;
+          });
+          const curator = createPiMemoryCurator({
+            provider: access.provider,
+            configured: () => true,
+            resolve: async () => access,
+          });
+          const stop = new AbortController();
+          const result = curator.curate(
+            { task, instructions: 'Check the synthetic action.', input: {} },
+            stop.signal,
+            (usage) => reports.push(usage),
+          );
+          const checked = assert.rejects(result, stopped ? /unavailable|abort/i : /timed out/);
+          for (let attempt = 1; attempt <= (stopped ? 1 : 3); attempt++) {
+            if (calls < attempt) await new Promise<void>((resolve) => (sent = resolve));
+            t.mock.timers.tick(modelFirstEventMs);
+            await setImmediate();
+            if (stopped) stop.abort();
+            else if (attempt < 3) t.mock.timers.tick(250 * 2 ** (attempt - 1));
+          }
+          await checked;
+          assert.equal(calls, stopped ? 1 : 3);
+          assert.deepEqual(
+            reports.map(({ status }) => status),
+            Array(calls).fill('failed'),
+          );
+          assert.deepEqual(
+            reports.map(({ attempt }) => attempt),
+            stopped ? [1] : [1, 2, 3],
+          );
+          assert.equal(new Set(reports.map(({ id }) => id)).size, calls);
+        },
+      );
+});
+
 test('action review failures identify the task, model, provider, and bounded provider reason', async (t) => {
   const { createServer } = await import('node:http');
   const { InMemoryCredentialStore } = await import('@earendil-works/pi-ai');
@@ -9122,6 +9862,85 @@ test('action review failures identify the task, model, provider, and bounded pro
   assert.equal(calls, 1);
   assert.ok(sessions[0]);
   assert.equal(new Set(sessions).size, 1);
+});
+
+test('OpenAI review output schemas constrain both key and subscription requests without leaking to later calls', async (t) => {
+  const responseSchema = {
+    type: 'object',
+    properties: { text: { type: 'string' }, action: { type: 'string' } },
+    required: ['text', 'action'],
+    additionalProperties: false,
+  };
+  for (const [provider, method, id, api, constrained, targetId = id] of [
+    ['openai', 'api_key', 'gpt-6-luna', 'openai-responses', true],
+    ['openai', 'subscription', 'gpt-6-luna', 'openai-responses', true],
+    ['openai', 'api_key', 'gpt-5.4', 'openai-responses', true],
+    ['openai', 'api_key', 'gpt-4o-2024-05-13', 'openai-responses', false],
+    ['openai', 'api_key', 'ft:gpt-6-luna:synthetic', 'openai-responses', false],
+    ['compatible', 'api_key', 'gpt-6-luna', 'openai-responses', false],
+    ['openai', 'api_key', 'gpt-6-luna', 'openai-completions', false],
+    ['openai', 'api_key', 'gpt-6-luna', 'openai-responses', false, 'gpt-4o-2024-05-13'],
+  ] as const)
+    await t.test(`${provider}/${id}/${targetId}/${api}/${method}`, async (t) => {
+      const access = smallContextAccess('compatible', id, 128000);
+      access.provider = provider;
+      access.method = method;
+      access.definition.spec = {
+        ...access.definition.spec,
+        provider,
+        api,
+        baseUrl: 'https://api.openai.com/v1',
+      };
+      access.read = async () =>
+        method === 'subscription'
+          ? chatgptFixtureCredential()
+          : { type: 'api_key', key: 'fixture-output-key' };
+      const payloads: unknown[] = [];
+      const model = access.definition.spec;
+      t.mock.method(ModelRuntime, 'create', async () => ({
+        registerProvider() {},
+        refresh: async () => {},
+        streamSimple() {},
+        getModel: () => model,
+        completeSimple: async (
+          _model: unknown,
+          _context: unknown,
+          options: { onPayload?: (body: unknown, target: unknown) => unknown },
+        ) => {
+          const body = { text: { verbosity: 'low' } };
+          payloads.push((await options.onPayload?.(body, { ...model, id: targetId })) ?? body);
+          return fauxAssistantMessage('{"text":"Save the synthetic rule?","action":"Save rule"}');
+        },
+      }));
+      const curator = createPiMemoryCurator({
+        provider,
+        configured: () => true,
+        resolve: async () => access,
+      });
+      await curator.curate({
+        task: 'review',
+        instructions: 'Write a synthetic confirmation.',
+        input: {},
+        responseSchema,
+      });
+      assert.deepEqual(payloads[0], {
+        text: {
+          verbosity: 'low',
+          ...(constrained
+            ? {
+                format: {
+                  type: 'json_schema',
+                  name: 'response',
+                  strict: true,
+                  schema: responseSchema,
+                },
+              }
+            : {}),
+        },
+      });
+      await curator.curate({ task: 'review', instructions: 'Review the action.', input: {} });
+      assert.deepEqual(payloads[1], { text: { verbosity: 'low' } });
+    });
 });
 
 test('an unavailable classification resolver never loads a fallback model', async () => {
@@ -10896,6 +11715,7 @@ test('invalid tool calls stop before another model request and a valid repair re
 });
 
 test('preparation reserves model cost before dispatch and blocks a request without a price', async () => {
+  const { piModelTrace } = await import('../src/providers/pi/traces.ts');
   for (const price of ['known', 'missing', 'negative']) {
     const priced = price === 'known';
     let calls = 0;
@@ -10932,7 +11752,10 @@ test('preparation reserves model cost before dispatch and blocks a request witho
         };
       },
     };
-    const { runtime, model } = await createPiModelRuntime(access);
+    const traced: import('../src/providers/pi/traces.ts').PiModelCall[] = [];
+    const { runtime, model } = await createPiModelRuntime(access, {
+      trace: (call) => traced.push(call),
+    });
     const result = await runtime.completeSimple(
       model,
       {
@@ -10953,6 +11776,12 @@ test('preparation reserves model cost before dispatch and blocks a request witho
     assert.equal(reservations, 1);
     assert.equal(calls, priced ? 1 : 0);
     assert.equal(result.stopReason, 'error');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(traced.length, 1);
+    assert.equal(
+      piModelTrace(traced[0], {}).metadata.error_type,
+      priced ? 'provider_unavailable' : 'model_config',
+    );
     assert.equal(settlements.length, priced ? 1 : 0);
     if (!priced) assert.match(result.errorMessage!, /Synthetic preparation price is unknown/);
   }
