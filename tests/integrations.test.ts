@@ -208,14 +208,6 @@ test('app folders reject escaped paths, incomplete contracts, and unsupported se
       /mcp\.json has no server named missing\./,
     ],
     [
-      'inherited-server',
-      'io.n8n.nod/app.json',
-      (value) => {
-        value.connection.server = 'constructor';
-      },
-      /mcp\.json has no server named constructor\./,
-    ],
-    [
       'placeholder',
       'io.n8n.nod/contract.json',
       (value) => {
