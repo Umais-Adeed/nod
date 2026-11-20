@@ -2,7 +2,7 @@ const percentEscape = /%([0-9a-f]{2})/gi;
 
 function leavesPath(pathname: string) {
   for (let text = pathname, previous = ''; text !== previous;) {
-    if (text.includes('\\') || text.split('/').some((part) => part === '.' || part === '..'))
+    if (text.includes('\\') || text.split(/[/?#;]/).some((part) => part === '.' || part === '..'))
       return true;
     previous = text;
     text = text.replace(percentEscape, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));

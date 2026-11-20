@@ -517,12 +517,16 @@ test('app access paths reject inconsistent API reads and more than 16 CLI fields
     '%2e%2e/v1%2fx',
     'a/%2e%2e/x',
     'a/.%2e/x',
+    '..;/x',
+    '..%3f/x',
+    '..%23/x',
   ])
     assert.throws(() => appRequestUrl(path.endpoint, escape), /saved API address/);
   for (const encoded of [
     'projects/my-group%2Fmy-project/issues',
     '@scope%2fname',
     'items/50%25off',
+    'search;v=1',
   ])
     assert.equal(
       appRequestUrl(path.endpoint, encoded),
