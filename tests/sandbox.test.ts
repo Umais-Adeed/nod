@@ -643,19 +643,37 @@ test('an uncertain command is stopped once and the workspace keeps working', asy
   }
 });
 
-test('a command stopped at a limit names that limit and its value', async () => {
+test('a command Nod stops at its output limit names the limit, and a Stop stays cancelled', async () => {
   const docker = fakeDocker(async () => ({ code: 0 }));
   try {
-    const cases = [
-      ['timeout', 'Workspace command ran longer than its 90-second limit.'],
-      ['install', 'The connected CLI install ran longer than its 600-second limit.'],
-      ['limit', 'Workspace command output passed its 16 MB limit.'],
-    ] as const;
-    for (const [index, [reason, message]] of cases.entries()) {
-      const run = docker.session.exec(reason, { timeoutMs: 90_000 });
-      docker.exit(index, -15, reason);
-      await assert.rejects(run, { message });
-    }
+    const flooding = docker.session.exec('flood');
+    await docker.launches[0]!.request;
+    const frame =
+      JSON.stringify({ type: 'stdout', data: Buffer.alloc(16384).toString('base64') }) + '\n';
+    for (let sent = 0; sent <= 16 * 1024 * 1024; sent += 16384)
+      docker.launches[0]!.child.stdout.emit('data', frame);
+    await docker.launches[0]!.cancelled;
+    docker.exit(0, -15, 'cancelled');
+    await assert.rejects(flooding, {
+      uncertain: false,
+      message: 'Workspace command output passed its 16 MB limit.',
+    });
+
+    const stop = new AbortController();
+    const stopped = docker.session.exec('stopped', { signal: stop.signal });
+    await docker.launches[1]!.request;
+    stop.abort();
+    await docker.launches[1]!.cancelled;
+    docker.exit(1, -15, 'cancelled');
+    await assert.rejects(stopped, { uncertain: false, message: 'Task cancelled.' });
+
+    const installing = docker.session.exec('install');
+    await docker.launches[2]!.request;
+    docker.exit(2, -15, 'install');
+    await assert.rejects(installing, {
+      uncertain: false,
+      message: 'The connected CLI install ran longer than its 600-second limit.',
+    });
   } finally {
     await docker.workspace.dispose();
   }
