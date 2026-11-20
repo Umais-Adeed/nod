@@ -1498,7 +1498,12 @@ export async function createDiscoveredConnections(
       if (!path.source || !path.env)
         throw error('Propose this CLI again with its install source and connectionId.', 409);
       const argv = z
-        .array(z.string().min(1).refine((value) => !value.includes('\0')))
+        .array(
+          z
+            .string()
+            .min(1)
+            .refine((value) => !value.includes('\0')),
+        )
         .min(1)
         .parse(args.argv);
       const timeoutSeconds = z.number().int().min(1).optional().parse(args.timeoutSeconds);
