@@ -3482,9 +3482,10 @@ const modules = {
     } },
   },
   '@pedrobef/vozz/g2p': { phonemize: () => { throw new Error('unused language'); } },
-  './phonemizer.ts': { phonemizeSpeech }, './models.ts': { localSpeechModels: [] },
+  './phonemizer.ts': { phonemizeSpeech }, './models.ts': { speechModels: () => [] },
   './audio.ts': { decodeLocalAudio: () => { throw new Error('unused decoder'); } },
-  './cache.ts': { localSpeechCacheMarker: '{}', localTranscriptionCacheMarker: '{}', matchesSpeechFile: async () => true, verifySpeechCache: async () => true },
+  './cache.ts': { speechCacheMarker: () => ({ name: 'speech-cache.json', content: '{}' }), matchesSpeechFile: async () => true, verifySpeechCache: async () => true },
+  './parakeet.ts': { createParakeet: async () => { throw new Error('unused transcriber'); } },
 };
 await worker.link(async (specifier) => {
   const exports = modules[specifier];
