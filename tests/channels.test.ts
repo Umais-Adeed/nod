@@ -3395,6 +3395,7 @@ const cache = process.argv[3];
 const require = createRequire(workerPath);
 const hf = await import(pathToFileURL(require.resolve('@huggingface/transformers')));
 const { phonemizeSpeech } = await import(new URL('./phonemizer.ts', pathToFileURL(workerPath)));
+const { encodeVoiceNote } = await import(new URL('./audio.ts', pathToFileURL(workerPath)));
 const tokenizer = new hf.PreTrainedTokenizer({
   model: { type: 'WordLevel', vocab: { '[UNK]': 0 }, unk_token: '[UNK]' },
   added_tokens: [], normalizer: null, post_processor: null, decoder: null,
@@ -3427,7 +3428,7 @@ const modules = {
   },
   '@pedrobef/vozz/g2p': { phonemize: () => { throw new Error('unused language'); } },
   './phonemizer.ts': { phonemizeSpeech }, './models.ts': { localSpeechModels: [] },
-  './audio.ts': { decodeLocalAudio: () => { throw new Error('unused decoder'); } },
+  './audio.ts': { decodeLocalAudio: () => { throw new Error('unused decoder'); }, encodeVoiceNote },
   './cache.ts': { localSpeechCacheMarker: '{}', localTranscriptionCacheMarker: '{}', matchesSpeechFile: async () => true, verifySpeechCache: async () => true },
 };
 await worker.link(async (specifier) => {
