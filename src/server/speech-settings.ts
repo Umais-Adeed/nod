@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { SpeechService } from './speech.ts';
-import type { LocalSpeechControls } from '../ports/speech.ts';
+import { SpeechProviderError, type LocalSpeechControls } from '../ports/speech.ts';
 import type { createPreferencesStore } from './preferences.ts';
 import { localTranscriptionModels } from '../shared/speech.ts';
 
@@ -40,9 +40,12 @@ export function registerSpeechSettings(
     let voicesError: string | undefined;
     try {
       await speech.refreshVoices(controller.signal, force);
-    } catch {
+    } catch (error) {
       controller.signal.throwIfAborted();
-      voicesError = 'ElevenLabs voices could not be loaded. Try again.';
+      voicesError =
+        error instanceof SpeechProviderError
+          ? error.message
+          : 'ElevenLabs voices could not be loaded. Try again.';
     } finally {
       reply.raw.off('close', stop);
     }
