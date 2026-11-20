@@ -259,6 +259,11 @@ app.whenReady().then(async () => {
     receipt('downloaded');
     await disposeArtifactFiles();
     receipt('files-closed', { artifactRemoved: !artifactRoot || !existsSync(artifactRoot) });
+    if (fixture.kind === 'migrate') {
+      receipt('normal-quit');
+      app.exit(0);
+      return;
+    }
     autoUpdater.quitAndInstall();
   });
   autoUpdater.on('update-not-available', () => { receipt('unavailable'); app.quit(); });
@@ -390,8 +395,16 @@ async function main() {
       receipt.completed = true;
     });
     if (route.file) {
+      let sent = 0;
+      response.on('close', () => {
+        if (sent === route.bytes) receipt.completed = true;
+      });
       response.writeHead(200, { 'content-type': 'application/zip', 'content-length': route.bytes });
-      createReadStream(route.file).pipe(response);
+      createReadStream(route.file)
+        .on('data', (chunk) => {
+          sent += chunk.length;
+        })
+        .pipe(response);
     } else if (typeof route.text === 'string') {
       response.writeHead(200, { 'content-type': 'text/plain' });
       response.end(route.text);
@@ -610,6 +623,24 @@ async function main() {
             entry.launchError = error.message;
           });
         }
+        if (
+          fixture.kind === 'migrate' &&
+          !entry.reopenedAfterQuit &&
+          events.some((event) => event.event === 'normal-quit') &&
+          !(await macInstallerRunning(`${fixture.identifier}.ShipIt`))
+        ) {
+          const installedVersion = await run('/usr/libexec/PlistBuddy', [
+            '-c',
+            'Print :CFBundleShortVersionString',
+            join(fixture.application, 'Contents/Info.plist'),
+          ]).catch(() => undefined);
+          if (installedVersion === latestVersion) {
+            entry.reopenedAfterQuit = new Date().toISOString();
+            spawn(executable, [], { stdio: 'ignore' }).on('error', (error) => {
+              entry.launchError = error.message;
+            });
+          }
+        }
         if (entry.launchError) break;
         await delay(100);
       }
@@ -642,7 +673,9 @@ async function main() {
       if (installs) {
         const artifactPrepared = events.findIndex((event) => event.event === 'artifact-prepared');
         const filesClosed = events.findIndex((event) => event.event === 'files-closed');
-        const quitAccepted = events.findIndex((event) => event.event === 'quit-accepted');
+        const quitAccepted = events.findIndex(
+          (event) => event.event === (fixture.kind === 'migrate' ? 'normal-quit' : 'quit-accepted'),
+        );
         check(
           'UPD-QUIT',
           artifactPrepared >= 0 &&
@@ -665,6 +698,8 @@ async function main() {
                 event.executable === executable,
             ),
         );
+        if (fixture.kind === 'migrate')
+          check('UPD-INSTALL-ON-QUIT', Boolean(entry.reopenedAfterQuit));
       } else {
         check(
           fixture.kind === 'reject' ? 'UPD-REJECT' : 'UPD-NO-DOWNGRADE',

@@ -151,6 +151,12 @@ A sign-in link expires after 10 minutes. The diagnostic report then records the 
 
 If an app tool error shows `HTTP 403` and a UTC time, [report a bug with a diagnostic report](/deploy/troubleshooting/#report-a-bug-with-a-diagnostic-report). Include that time and any Cloudflare Ray ID in your feedback text. The displayed `0x` is a formatting prefix; support removes it before searching Cloudflare.
 
+### An app tool isn't offered or fails with HTTP 404
+
+Nod checks an action name it hasn't looked up against the connection service's list before it asks you anything or sends a request. If the service doesn't list that name, Nod refuses the call and says the action isn't offered. Nothing reaches the app. This happens when Nod calls an action without searching the app's tools first. Ask Nod to search the app's tools for the exact action and try again.
+
+If the check itself can't run, the call goes ahead, and the service may answer an unknown action with `HTTP 404`. If an action Nod found by searching still returns `HTTP 404`, [report a bug with a diagnostic report](/deploy/troubleshooting/#report-a-bug-with-a-diagnostic-report).
+
 ### The connection service refused this request
 
 When the connection service refuses a file for an app, the error shows its HTTP status, and its reason when Nod recognizes it. For example: `The connection service refused this request: file_verification_failed. HTTP 502.` The app action doesn't run, so nothing reaches the recipient.
@@ -188,6 +194,8 @@ The bot was set up with a webhook elsewhere. Remove that webhook to use local po
 ### A scheduled task didn't run
 
 For a local desktop assistant, scheduled tasks run only while Nod is open and your computer is awake. Closing the window keeps Nod running in the menu bar or tray, but **Quit Nod** stops it. **Open at login** is on after setup; keep it on in **Settings → General** if you rely on schedules. After a restart or power cut, Nod starts only once you sign in to your computer, and a Mac with FileVault turned on never signs in automatically. For a remote assistant, check that the server is running; closing a desktop client does not stop its schedules.
+
+A run that starts while the computer has no internet connection, such as right after it wakes, fails with "Nod couldn't reach Anthropic because this computer had no internet connection", naming your model provider, with the code (such as `ENOTFOUND`) beside it. The chat shows when the run was due, which runs were skipped and when Nod tried. OpenAI-compatible, Azure OpenAI and Amazon Bedrock connections keep their usual error, because their address or Region may be wrong, and so do providers that report no network code, such as Google. Nod doesn't run it again on its own; select **Run now** once you're online, or wait for the next run. To keep schedules running while your computer sleeps, [run Nod on a server](/deploy/self-host/).
 
 ### An action shows as uncertain
 

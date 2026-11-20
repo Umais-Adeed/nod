@@ -1,10 +1,15 @@
-import { browserErrorMessage, type BrowserErrorCode } from '../shared/browser-errors.ts';
+import {
+  browserErrorMessage,
+  type BrowserErrorCode,
+  type BrowserSignInGuard,
+} from '../shared/browser-errors.ts';
 import type { BrowserHandoffInput } from '../shared/browser-handoff.ts';
 
 export class BrowserActionError extends Error {
   constructor(
     readonly code: BrowserErrorCode,
     readonly detail?: string,
+    readonly signInGuard?: BrowserSignInGuard,
   ) {
     super(
       detail
@@ -59,11 +64,21 @@ export interface BrowserAction {
   expectOrigin?: string;
   expectUrl?: string;
   expectTarget?: string;
+  expectSelections?: string;
   readOnly?: boolean;
 }
 export interface BrowserControl {
   role: string;
   name: string;
+}
+export interface BrowserSelection {
+  role: string;
+  name: string;
+  value?: string;
+  checked?: 'true' | 'false' | 'mixed';
+  selected?: boolean;
+  selectedCount?: number;
+  group?: string;
 }
 export interface BrowserObservation {
   text: string;
@@ -77,6 +92,7 @@ export interface BrowserDownloadInput {
   expectOrigin?: string;
   expectUrl?: string;
   expectTarget?: string;
+  expectSelections?: string;
 }
 export interface BrowserDownload {
   bytes: Buffer;
@@ -90,6 +106,7 @@ export interface BrowserUploadInput {
   expectOrigin?: string;
   expectUrl?: string;
   expectTarget?: string;
+  expectSelections?: string;
 }
 export type CredentialKind = 'identifier' | 'password' | 'otp';
 export interface BrowserPage {
@@ -100,6 +117,11 @@ export interface BrowserPage {
   submits?: { method: string; to: string } | 'unknown';
   dropTarget?: BrowserControl[];
   dialog?: string;
+  currentSelections?: {
+    binding?: string;
+    values: BrowserSelection[];
+    incomplete?: string;
+  };
 }
 export interface CredentialInput {
   threadId: string;
@@ -163,14 +185,17 @@ export interface Computer {
     state: 'live' | 'last_known' | 'unavailable';
     capturedAt?: string;
   };
-  injectCredentials(input: CredentialInput): Promise<CredentialSubmission | void>;
-  fillCard(input: CardEntry): Promise<void>;
+  injectCredentials(
+    input: CredentialInput,
+    signal?: AbortSignal,
+  ): Promise<CredentialSubmission | void>;
+  fillCard(input: CardEntry, signal?: AbortSignal): Promise<void>;
   cardDestinations(
     threadId: string,
     fields: CardFields,
   ): Promise<{ document: string; destinations: Partial<Record<keyof CardFields, string>> }>;
   checkoutImage(threadId: string): Promise<Uint8Array>;
-  currentPage(threadId: string, step?: BrowserAction): Promise<BrowserPage>;
+  currentPage(threadId: string, step?: BrowserAction, signal?: AbortSignal): Promise<BrowserPage>;
   signInMethods?(
     threadId: string,
     origin: string,

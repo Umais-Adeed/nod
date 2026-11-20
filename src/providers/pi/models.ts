@@ -32,6 +32,7 @@ import type {
 import {
   bedrockRegionPattern,
   boundedPrice,
+  modelPricingSignature,
   modelProviders,
   modelProviderNames,
   type ModelProvider,
@@ -49,6 +50,7 @@ import { modelServiceError } from '../model-error.ts';
 import {
   antLingModel,
   nativeAudioModel,
+  openAIModels,
   assistantModelId,
   assistantModels,
   cloudflareCredential,
@@ -308,6 +310,15 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
       serverJson('/api/v1/models'),
     ]);
     const ollama = z.object({ version: z.string() }).safeParse(version).success;
+    const running = ollama ? await serverJson('/api/ps') : undefined;
+    const loadedModels = entries(
+      z.object({ models: z.array(z.unknown()) }).safeParse(running).data?.models ?? [],
+      z.object({
+        name: z.string().min(1).max(200).optional(),
+        model: z.string().min(1).max(200).optional(),
+        context_length: z.number().int().positive(),
+      }),
+    );
     const studioModels = entries(
       z.object({ models: z.array(z.unknown()) }).safeParse(studio).data?.models ?? [],
       lmStudioModelSchema,
@@ -333,12 +344,20 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
               ? ollamaModel(shown.data)
               : undefined;
           if (known?.usable === false) return [];
-          const contextWindow =
+          const reportedContext =
             known?.contextWindow ??
             entry.context_length ??
             entry.context_window ??
             entry.max_model_len ??
             128_000;
+          const contextWindow = Math.min(
+            reportedContext,
+            ...(studioModel
+              ? []
+              : loadedModels
+                  .filter((model) => model.name === entry.id || model.model === entry.id)
+                  .map((model) => model.context_length)),
+          );
           return [
             definition({
               id: entry.id,
@@ -831,6 +850,12 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
         const ids = new Set(
           list.filter((m) => !m.visibility || m.visibility === 'list').map((m) => m.slug ?? m.id),
         );
+        if (provider === 'openai')
+          local.push(
+            ...openAIModels(credential.type === 'api_key' ? credential.region : undefined).filter(
+              (model) => !local.some(({ id }) => id === model.id),
+            ),
+          );
         return local.filter((m) => ids.has(m.id)).map(definition);
       }
       const list = entries(
@@ -1263,6 +1288,8 @@ export async function createPiModelRuntime(
                 }
                 throw error;
               });
+              phase = 'response';
+              status = response.status;
               return usage ? usage.response(response) : response;
             },
           }
@@ -1445,6 +1472,7 @@ export async function createPiModelRuntime(
           costUsd: null,
           pricing: 'unavailable',
           ...piUsageMetrics(message?.usage),
+          pricingSignature: modelPricingSignature(target.cost, target.api),
         });
       };
       const cancel = () => report();
