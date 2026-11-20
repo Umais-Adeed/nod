@@ -28,7 +28,7 @@ import {
 import {
   ContextLimitError,
   ModelRequestError,
-  outputLimitReached,
+  OutputLimitError,
   ToolFailureError,
   type RuntimeContext,
   type RuntimeResult,
@@ -611,7 +611,8 @@ test(
         if (context.prompt === 'limit race fixture') throw new Error(spendingLimitReached);
         if (context.prompt === 'unexpected failure fixture')
           throw new Error('Synthetic runtime failure.');
-        if (context.prompt === 'output limit fixture') throw new Error(outputLimitReached);
+        if (context.prompt === 'output limit fixture')
+          throw new OutputLimitError('Synthetic output limit.');
         if (context.prompt === 'tool refusal fixture')
           throw new ToolFailureError('The bash tool failed five times. Trust refused the command.');
         if (context.prompt.startsWith('session-fixture')) {
@@ -3416,7 +3417,11 @@ test(
             failed.turnId,
           ])
         ).rows[0];
-        assert.deepEqual(turn, { status: 'failed', error: outputLimitReached, withdrawn: false });
+        assert.deepEqual(turn, {
+          status: 'failed',
+          error: 'Synthetic output limit.',
+          withdrawn: false,
+        });
       });
 
       await t.test('an exhausted tool refusal reports the cause without a bug report', async () => {

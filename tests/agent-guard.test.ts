@@ -16,7 +16,7 @@ import {
   appConfirmation,
   ContextLimitError,
   ModelRequestError,
-  outputLimitReached,
+  OutputLimitError,
   ToolFailureError,
 } from '../src/ports/agent.ts';
 import type {
@@ -105,11 +105,7 @@ test('only a terminal context failure requests a chat context restart', async (t
               !(error instanceof ContextLimitError) &&
               error.message.includes(ending === 'quota' ? 'Synthetic quota exceeded.' : 'HTTP 401')
             );
-          return (
-            error instanceof Error &&
-            error.constructor === Error &&
-            error.message === outputLimitReached
-          );
+          return error instanceof OutputLimitError && !(error instanceof ModelRequestError);
         });
     });
 });
