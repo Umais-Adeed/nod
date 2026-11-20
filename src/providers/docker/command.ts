@@ -8,6 +8,10 @@ import { createHash } from 'node:crypto';
 import { serviceEnvironment } from '../process.ts';
 import type { ConnectedCli } from '../../ports/computer.ts';
 import { threadIdentity } from '../../ports/thread-identity.ts';
+import {
+  appEnvironmentNamePattern,
+  appEnvironmentNameMaxLength,
+} from '../../shared/app-definitions.ts';
 import type { CommandProcess } from '../command-process.ts';
 
 const cliInstallProgram = `import bz2,fcntl,gzip,hashlib,json,lzma,os,shutil,subprocess,sys
@@ -88,7 +92,7 @@ try:
  r=json.loads(line)
  if not isinstance(r['args'],list) or not all(isinstance(v,str) for v in r['args']): raise ValueError()
  env=r.get('environment',{})
- if not isinstance(env,dict) or not all(isinstance(k,str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}(?:TOKEN|KEY|SECRET|PASSWORD|_ID|_SID)',k) and isinstance(v,str) and v for k,v in env.items()): raise ValueError()
+ if not isinstance(env,dict) or not all(isinstance(k,str) and len(k)<=${appEnvironmentNameMaxLength} and re.fullmatch(${JSON.stringify(appEnvironmentNamePattern.source)},k) and isinstance(v,str) and v for k,v in env.items()): raise ValueError()
  limit=int(r['maxBytes'])
  timeout=float(r['timeoutMs'])/1000
  if limit<1 or not 0<timeout: raise ValueError()
@@ -191,7 +195,7 @@ for index,(args,child_env,seconds) in enumerate(steps):
   output('stderr',b'The connected CLI install is not sealed. Propose it again.\\n')
   finish({'type':'exit','code':126,'reason':None})
  try: p=subprocess.Popen(args,stdin=subprocess.PIPE if last else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,env=child_env,cwd=home)
- except OSError as error:
+ except (OSError,ValueError) as error:
   output('stderr',(str(error)+'\\n').encode())
   finish({'type':'exit','code':127,'reason':None})
  sel.register(p.stdout,selectors.EVENT_READ,'stdout')

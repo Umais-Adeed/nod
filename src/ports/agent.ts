@@ -26,9 +26,11 @@ export interface ModelUsageObservation {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  cacheWrite1hTokens?: number;
   totalTokens: number;
   costUsd: number | null;
   estimateUsd?: number | null;
+  pricingSignature?: string;
   costSource: 'sdk_estimate' | 'unavailable';
   createdAt: string;
 }
@@ -118,6 +120,7 @@ export interface RuntimeContext {
   turnId: string;
   sessionId: string;
   resumed?: boolean;
+  contextRestart?: string;
   prompt: string;
   audioCaption?: string;
   background?: boolean;
@@ -134,6 +137,7 @@ export interface RuntimeContext {
   account?: RuntimeAccount;
   connectedApps?: ConnectedApp[];
   localFiles?: boolean;
+  computerUse?: boolean;
   mcpServers?: ConnectedMcpServer[];
   currentMessageId?: string;
   automatic?: boolean;
@@ -172,7 +176,7 @@ export interface RuntimeContext {
   withdrawnRequest?: 'stopped' | 'failed';
   confirmedActions?: string[];
   credentialRequests?: Array<
-    Pick<CredentialRequest, 'turnId' | 'origin' | 'label' | 'kind' | 'status'>
+    Pick<CredentialRequest, 'turnId' | 'origin' | 'label' | 'kind' | 'status' | 'notEntered'>
   >;
   taskContext?: {
     id: string;
@@ -344,7 +348,7 @@ export type AgentEvent =
   | { type: 'retry'; model: string; attempt: number; attempts: number }
   | { type: 'final'; text: string }
   | ModelUsageObservation
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; contextExhausted?: boolean };
 export interface AgentAudio {
   id: string;
   mimeType: string;
@@ -362,8 +366,9 @@ export interface AgentSessionOptions extends ExecutionScope {
   automatic?: boolean;
   restricted?: boolean;
   ephemeral?: boolean;
-  restartable?: boolean;
+  newRequest?: boolean;
   scheduleCache?: 'short' | 'long';
+  contextRestart?: string;
   keepWarm?(): Promise<boolean>;
   systemPrompt: string;
   ownerContext?: string;
@@ -374,7 +379,7 @@ export interface AgentSessionOptions extends ExecutionScope {
   runTool(
     name: string,
     params: unknown,
-    run: () => Promise<AgentToolResult>,
+    run: (signal?: AbortSignal) => Promise<AgentToolResult>,
     options?: { nested?: boolean },
   ): Promise<AgentToolResult>;
   onEvent(event: AgentEvent): void;
@@ -401,3 +406,5 @@ export interface Agent {
   dispose(): void | Promise<void>;
 }
 export class ModelRequestError extends Error {}
+export class ContextLimitError extends ModelRequestError {}
+export class ToolFailureError extends Error {}
