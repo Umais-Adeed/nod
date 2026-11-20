@@ -1,11 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { bundledApps, appAccessPath, type BundledApp } from './app-catalog.ts';
 import { appRequestUrl, appRequestHeaders } from './app-requests.ts';
-import {
-  appCliArgvSchema,
-  appEnvironmentNameSchema,
-  appDefinitionSchema,
-} from '../shared/app-definitions.ts';
+import { appEnvironmentNameSchema, appDefinitionSchema } from '../shared/app-definitions.ts';
 import { appAccessSchema } from './app-access.ts';
 import { isDeepStrictEqual } from 'node:util';
 import type { FastifyInstance } from 'fastify';
@@ -1501,7 +1497,10 @@ export async function createDiscoveredConnections(
       if (path.kind !== 'cli') throw error('Choose a CLI access path.');
       if (!path.source || !path.env)
         throw error('Propose this CLI again with its install source and connectionId.', 409);
-      const argv = appCliArgvSchema.parse(args.argv);
+      const argv = z
+        .array(z.string().min(1).refine((value) => !value.includes('\0')))
+        .min(1)
+        .parse(args.argv);
       const timeoutSeconds = z.number().int().min(1).optional().parse(args.timeoutSeconds);
       return { row, call: { kind: 'cli' as const, path, argv, timeoutSeconds } };
     }
