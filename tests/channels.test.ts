@@ -1640,6 +1640,260 @@ test('WhatsApp bot mode accepts a confirmed private ID when mapping lookups miss
   );
 });
 
+test('Telegram approval callbacks accept only taps on the paired bot message', async () => {
+  const acknowledgements: Record<string, unknown>[] = [];
+  const transport = createChatSdkTransport({} as pg.Pool, fixtureEnv, {
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname.split('/').at(-1), 'answerCallbackQuery');
+      acknowledgements.push(JSON.parse(String(init?.body)));
+      return Response.json({ ok: true, result: true });
+    },
+  });
+  const callback = {
+    id: 'synthetic-tap',
+    data: 'nod:approval:yes',
+    from: { id: 123456, is_bot: false },
+    message: {
+      message_id: 42,
+      date: 1,
+      from: { id: 987, is_bot: true },
+      chat: { id: 123456, type: 'private' },
+    },
+  };
+  const receive = (value: unknown, secret = fixtureEnv.TELEGRAM_WEBHOOK_SECRET_TOKEN) =>
+    transport.receive({
+      channelId: 'telegram',
+      method: 'POST',
+      query: {},
+      headers: { 'x-telegram-bot-api-secret-token': secret },
+      body: Buffer.from(JSON.stringify({ update_id: 123, callback_query: value })),
+    });
+  try {
+    const accepted = await receive(callback);
+    assert.deepEqual(accepted.messages, []);
+    assert.equal(accepted.approvals?.length, 1);
+    const { acknowledge, ...approval } = accepted.approvals![0]!;
+    assert.deepEqual(approval, {
+      channelId: 'telegram',
+      accountId: '987',
+      senderId: '123456',
+      threadId: 'telegram:123456',
+      messageId: '123456:42',
+      approved: true,
+    });
+    assert.equal(acknowledgements.length, 0);
+    await acknowledge('recorded');
+    const declined = await receive({
+      ...callback,
+      id: 'synthetic-second-tap',
+      data: 'nod:approval:no',
+    });
+    assert.equal(declined.approvals?.[0]?.approved, false);
+    await declined.approvals?.[0]?.acknowledge('unavailable');
+    assert.deepEqual(
+      acknowledgements.map(({ callback_query_id }) => callback_query_id),
+      ['synthetic-tap', 'synthetic-second-tap'],
+    );
+    assert.notEqual(acknowledgements[0]!.text, acknowledgements[1]!.text);
+    assert.equal((await receive(callback, 'wrong-fixture-secret')).status, 401);
+    for (const change of [
+      { data: 'nod:approval:yes:untrusted' },
+      { from: { id: 654321, is_bot: false } },
+      { from: { id: 123456, is_bot: true } },
+      { message: { ...callback.message, from: { id: 988, is_bot: true } } },
+      { message: { ...callback.message, chat: { id: 654321, type: 'private' } } },
+      { message: { ...callback.message, chat: { id: 123456, type: 'group' } } },
+      { message: { ...callback.message, date: 0 } },
+      { message: undefined, inline_message_id: 'synthetic-inline-message' },
+    ]) {
+      const rejected = await receive({ ...callback, ...change });
+      assert.deepEqual(rejected.messages, []);
+      assert.equal(rejected.approvals, undefined);
+    }
+    assert.equal(acknowledgements.length, 2);
+  } finally {
+    await transport.close();
+  }
+});
+
+test(
+  'Telegram preserves approval text and enables buttons only when callbacks can arrive',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async (t) => {
+    const schema = `test_telegram_approval_${randomUUID().replaceAll('-', '')}`;
+    const admin = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new pg.Pool({
+      connectionString: process.env.TEST_DATABASE_URL,
+      options: `-c search_path=${schema}`,
+    });
+    t.after(async () => {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    });
+    const deliveries: Record<string, unknown>[] = [];
+    let webhookChecks = 0;
+    let callbackEnabled = true;
+    let pollingAcknowledged = false;
+    let rejectMarkdown = false;
+    let markdownRefusals = 0;
+    let now = Date.now();
+    t.mock.method(Date, 'now', () => now);
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const method = new URL(input instanceof Request ? input.url : String(input)).pathname
+          .split('/')
+          .at(-1);
+        if (method === 'getMe')
+          return Response.json({
+            ok: true,
+            result: { id: 987, is_bot: true, first_name: 'Fixture', username: 'fixture_bot' },
+          });
+        if (method === 'getWebhookInfo') {
+          webhookChecks++;
+          return Response.json({
+            ok: true,
+            result: {
+              url: 'https://example.test/telegram',
+              allowed_updates: callbackEnabled ? ['message', 'callback_query'] : ['message'],
+            },
+          });
+        }
+        const body = JSON.parse(String(init?.body));
+        if (method === 'getUpdates') {
+          const callback = {
+            id: 'synthetic-polling-tap',
+            data: Object(deliveries.at(-1)?.reply_markup).inline_keyboard[0][1].callback_data,
+            from: { id: 123456, is_bot: false },
+            message: {
+              message_id: deliveries.length,
+              date: 1,
+              from: { id: 987, is_bot: true },
+              chat: { id: 123456, type: 'private' },
+            },
+          };
+          return Response.json({
+            ok: true,
+            result: body.allowed_updates.includes('callback_query')
+              ? [{ update_id: 123, callback_query: callback }]
+              : [],
+          });
+        }
+        if (method === 'answerCallbackQuery') {
+          assert.equal(body.callback_query_id, 'synthetic-polling-tap');
+          pollingAcknowledged = true;
+          return Response.json({ ok: true, result: true });
+        }
+        assert.equal(method, 'sendMessage');
+        if (rejectMarkdown && body.parse_mode === 'MarkdownV2') {
+          markdownRefusals++;
+          return Response.json(
+            { ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
+            { status: 400 },
+          );
+        }
+        deliveries.push(body);
+        return Response.json({
+          ok: true,
+          result: {
+            message_id: deliveries.length,
+            date: 1,
+            chat: { id: 123456, type: 'private' },
+            text: body.text,
+          },
+        });
+      },
+    );
+    const env = { ...fixtureEnv, WHATSAPP_ENABLED: 'false', TELEGRAM_MODE: 'webhook' };
+    const transport = createChatSdkTransport(pool, env);
+    const polling = combineMessagingTransports(
+      createChatSdkTransport(pool, { ...env, TELEGRAM_MODE: 'polling' }),
+    );
+    const prompt = 'Review boîte@example.test.\n    Never send email or change the source.';
+    const approval = {
+      channelId: 'telegram',
+      accountId: '987',
+      threadId: 'telegram:123456',
+      replyToMessageId: '123456:7',
+      text: `Schedule instruction:\n\n\`\`\`\n${prompt}\n\`\`\`\n\nCreate this schedule?`,
+      approval: true as const,
+    };
+    try {
+      assert.deepEqual(await transport.post(approval), {
+        id: '123456:1',
+        ids: ['123456:1'],
+        approvalButtons: true,
+      });
+      const sent = deliveries[0]!;
+      assert.equal(sent.parse_mode, 'MarkdownV2');
+      assert.ok(String(sent.text).includes(prompt));
+      assert.ok(String(sent.text).includes('Create this schedule?'));
+      assert.equal(Object(sent.reply_parameters).message_id, 7);
+      assert.deepEqual(
+        Object(sent.reply_markup).inline_keyboard[0].map(
+          (button: { callback_data: string }) => button.callback_data,
+        ),
+        ['nod:approval:yes', 'nod:approval:no'],
+      );
+      rejectMarkdown = true;
+      const plain = await transport.post(approval);
+      assert.equal(markdownRefusals, 1);
+      assert.equal(plain.approvalButtons, true);
+      assert.equal(deliveries.at(-1)?.parse_mode, undefined);
+      assert.equal(deliveries.at(-1)?.text, markdownToPlainText(approval.text));
+      assert.deepEqual(deliveries.at(-1)?.reply_markup, sent.reply_markup);
+      assert.equal(webhookChecks, 1);
+      callbackEnabled = false;
+      now += 60_001;
+      await transport.post(approval);
+      assert.equal(webhookChecks, 2);
+      const plainApproval = deliveries.at(-1)!;
+      assert.equal(plainApproval.reply_markup, undefined);
+      assert.ok(String(plainApproval.text).startsWith(markdownToPlainText(approval.text)));
+      assert.match(String(plainApproval.text), /reply.*yes.*no/i);
+      const nearLimit = 'a'.repeat(3475);
+      const same = await transport.post({ ...approval, text: nearLimit });
+      assert.equal(same.ids?.length, 2);
+      assert.equal(deliveries.at(-2)?.text, nearLimit);
+      assert.equal(
+        Object(deliveries.at(-1)?.reply_parameters).message_id,
+        Number(same.id.split(':').at(-1)),
+      );
+      assert.match(String(deliveries.at(-1)?.text), /reply.*yes.*no/i);
+      callbackEnabled = true;
+      now += 60_001;
+      await transport.post(approval);
+      assert.equal(webhookChecks, 3);
+      assert.ok(deliveries.at(-1)?.reply_markup);
+      const long = await transport.post({
+        ...approval,
+        text: 'Long fixture sentence. '.repeat(230),
+      });
+      assert.ok(long.ids && long.ids.length > 1);
+      assert.ok(deliveries.slice(-long.ids.length).every((message) => !message.reply_markup));
+      assert.match(String(deliveries.at(-1)?.text), /reply.*yes.*no/i);
+      const polled = await polling.post(approval);
+      assert.equal(webhookChecks, 3);
+      await polling.poll!(
+        async () => assert.fail('An approval tap must not be treated as a message.'),
+        undefined,
+        undefined,
+        async ({ approved, messageId, acknowledge }) => {
+          assert.equal(approved, false);
+          assert.equal(messageId, polled.id);
+          await acknowledge('recorded');
+        },
+      );
+      assert.ok(pollingAcknowledged);
+    } finally {
+      await Promise.all([transport.close(), polling.close()]);
+    }
+  },
+);
+
 test('Telegram media keeps native replies and checks the sender before any download', async () => {
   const bytes = Buffer.from('synthetic image bytes');
   const requests: string[] = [];
@@ -1860,6 +2114,10 @@ test('Telegram downloads stop at 20 MB whatever size the sender, Bot API or file
   assert.equal(
     (await download(undefined, () => new Response(new Uint8Array(limit)))).byteLength,
     limit,
+  );
+  await assert.rejects(
+    download(undefined, () => new Response('Not Found', { status: 404, statusText: 'Not Found' })),
+    (error: Error) => error.message === 'Telegram file download failed (HTTP 404): Not Found',
   );
   const refused = (description: string) =>
     telegramAttachments(message, 'token', async () =>
@@ -5098,12 +5356,8 @@ test(
             pool,
             ownerId: 'local-development',
             canDeliverLiteral: channels.canDeliverLiteral,
-            review: async (_instructions, value) => {
+            review: async () => {
               wordingCalls++;
-              if (Object(value).purpose === 'confirmation_review') {
-                assert.ok(Object(value).text.includes(prompt));
-                return { valid: true };
-              }
               return { text: 'Create this schedule?', action: 'Create schedule' };
             },
           });
@@ -5154,14 +5408,14 @@ test(
             ).rows[0],
             { state: 'sent', provider_message_ids: [`123456:${before + 101}`] },
           );
-          assert.equal(wordingCalls, 2);
+          assert.equal(wordingCalls, 1);
           definition.title = '{{emoji:smile}}';
           proposal.args.title = definition.title;
           await assert.rejects(
             communication.describe(proposal),
             /cannot show the complete schedule confirmation in this channel/,
           );
-          assert.equal(wordingCalls, 2);
+          assert.equal(wordingCalls, 1);
           assert.equal(sent.length, before + 1);
         },
       );
