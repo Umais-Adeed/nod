@@ -674,6 +674,14 @@ test('a command Nod stops at its output limit names the limit, and a Stop stays 
       uncertain: false,
       message: 'The connected CLI install ran longer than its 600-second limit.',
     });
+
+    const slow = docker.session.exec('slow', { timeoutMs: 90_000 });
+    await docker.launches[3]!.request;
+    docker.exit(3, -15, 'timeout');
+    await assert.rejects(slow, {
+      uncertain: false,
+      message: 'Workspace command ran longer than its 90-second limit.',
+    });
   } finally {
     await docker.workspace.dispose();
   }
