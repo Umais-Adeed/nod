@@ -14,17 +14,11 @@ export function assistantNotificationPreview(message, secrets = []) {
     const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
     const source = redactPreview(value, secrets).slice(0, 16_384);
     const text = source
-      .replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
-        if (!entity.startsWith('#')) return entities[entity.toLowerCase()] || match;
-        const code =
-          entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
-        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
-      })
       .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
       .replace(/<(script|style)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, '')
       .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, '')
       .replace(/^\s*\[[^\]\n]+\]:[^\n]*$/gm, '')
-      .replace(/!?\[([^\]\n]*)\]\([^\n)]*\)/g, '$1')
+      .replace(/!?\[([^\]\n]*)\]\((?:[^()\n]|\([^()\n]*\))*\)/g, '$1')
       .replace(/!?\[([^\]\n]+)\]\[[^\]\n]*\]/g, '$1')
       .replace(/<[A-Za-z/!?][^>]*>/g, '')
       .replace(/\bhttps?:\/\/[^\s<>()]+/gi, (url) => {
@@ -39,6 +33,12 @@ export function assistantNotificationPreview(message, secrets = []) {
       .replace(/(?<![\p{L}\p{N}_])(_{1,3})(?=\S)([\s\S]*?\S)\1(?![\p{L}\p{N}_])/gu, '$2')
       .replace(/`([^`]+)`/g, '$1')
       .replace(/\\([\\`*_{}\[\]()#+.!-])/g, '$1')
+      .replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
+        if (!entity.startsWith('#')) return entities[entity.toLowerCase()] || match;
+        const code =
+          entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+      })
       .replace(
         /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069]/g,
         '',
