@@ -794,6 +794,11 @@ test('a failed export keeps the server reason and status', async (t) => {
     message: 'Your memory could not be exported: The export is too large.',
     status: 413,
   });
+  t.mock.method(globalThis, 'fetch', async () => new Response('<html>502</html>', { status: 502 }));
+  await assert.rejects(downloadExport('/api/memory/export', 'memory.json', 'Your memory'), {
+    message: 'Your memory could not be exported (HTTP 502).',
+    status: 502,
+  });
 });
 
 test('decision catalog filters native text decisions, expires and refuses failed lookups', async (t) => {

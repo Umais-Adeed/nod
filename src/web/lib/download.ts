@@ -1,10 +1,15 @@
-import { ApiError, apiResponse, responseError } from './api';
+import { ApiError, apiResponse } from './api';
 
 export async function downloadExport(path: string, fallbackName: string, what: string) {
   const response = await apiResponse(path, { cache: 'no-store' });
   if (!response.ok) {
-    const { message, status } = await responseError(response);
-    throw new ApiError(`${what} could not be exported: ${message}`, status);
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    throw new ApiError(
+      typeof body?.error === 'string' && body.error.trim()
+        ? `${what} could not be exported: ${body.error}`
+        : `${what} could not be exported (HTTP ${response.status}).`,
+      response.status,
+    );
   }
   const name =
     /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ??
