@@ -82,6 +82,10 @@ test('notification previews keep escaped tags as text and links with parenthesis
     }),
     'Open Foo now',
   );
+  assert.equal(
+    assistantNotificationPreview({ text: 'See https&#58;//example.com/private/path?id=7 now' }),
+    'See example.com now',
+  );
 });
 
 test('notification previews redact configured credentials after decoding formatting', () => {
