@@ -2794,6 +2794,10 @@ test('speech errors keep the service reason and status, and separate a rate limi
       ) && !/credit/i.test(error.message),
   );
   await assert.rejects(
+    synthesize(429, { error: { message: 'x'.repeat(5000) } }),
+    (error: Error) => error.message.length < 400,
+  );
+  await assert.rejects(
     synthesize(402, { error: { message: 'Insufficient credits', code: 402 } }),
     /HTTP 402.*Insufficient credits.*credits/,
   );

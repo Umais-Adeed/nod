@@ -20,7 +20,7 @@ export async function readSpeechResponse(
     const failure = await modelServiceError(response, provider, secrets);
     throw new SpeechProviderError(
       response.status === 429
-        ? `${provider} rate-limited this request${failure.reason ? `: ${failure.reason}` : '.'}`
+        ? `${provider} rate-limited this request${failure.reason ? `: ${Array.from(failure.reason).slice(0, 300).join('')}` : '.'}`
         : response.status === 402
           ? `${failure.message} Check its credits.`
           : failure.message,
