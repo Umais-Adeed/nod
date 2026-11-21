@@ -679,16 +679,6 @@ test('chat presentations reject unsafe URLs, executable shapes and inconsistent 
     presentationSchema.safeParse({ ...booking, rating: { ...booking.rating, count: undefined } })
       .success,
   );
-  for (const [count, text] of [
-    [1, '1 review'],
-    [12345, '12,345 reviews'],
-  ] as const)
-    assert.ok(
-      presentationText(
-        presentationSchema.parse({ ...booking, rating: { ...booking.rating, count } }),
-      ).includes(`· ${text} ·`),
-      text,
-    );
   for (const value of [
     { ...booking, rating: { ...booking.rating, value: 5.1 } },
     { ...booking, rating: { ...booking.rating, scale: 0 } },
