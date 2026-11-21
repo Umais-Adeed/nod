@@ -224,15 +224,17 @@ export function canDeliverWhatsAppLiteral(markdown: string, literal: string) {
 
 export const whatsappTextLimit = 4096;
 
-const fenceLine = /^ {0,3}(`{3,16}|~{3,16})([^`\n]{0,40})$/;
-const closingFence = /^ {0,3}(`{3,16}|~{3,16})[ \t]*$/;
+const fenceLine = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
+const closingFence = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const closes = (line: string, marker: string) => {
+  const closing = closingFence.exec(line)?.[1];
+  return closing?.[0] === marker[0] && closing.length >= marker.length;
+};
 
 function openFence(text: string) {
   let open: { line: string; marker: string } | undefined;
   for (const line of text.split('\n')) {
-    const closing = closingFence.exec(line)?.[1];
-    if (open && closing?.[0] === open.marker[0] && closing.length >= open.marker.length)
-      open = undefined;
+    if (open && closes(line, open.marker)) open = undefined;
     else if (!open) {
       const marker = fenceLine.exec(line)?.[1];
       if (marker) open = { line, marker };
@@ -267,13 +269,16 @@ export function splitText(text: string, limit: number) {
       cut = cutAt(limit - fence.marker.length - 1);
       fence = openFence(rest.slice(0, cut));
     }
-    const tail = rest.slice(cut).trimStart();
     if (fence && cut > fence.line.length + 1) {
+      const tail = rest.slice(cut).replace(/^\n+/, '');
+      const next = tail.split('\n', 1)[0]!;
       parts.push(`${rest.slice(0, cut).trimEnd()}\n${fence.marker}`);
-      rest = tail && tail.trimEnd() !== fence.marker ? `${fence.line}\n${tail}` : '';
+      rest = closes(next, fence.marker)
+        ? tail.slice(next.length).trimStart()
+        : `${fence.line}\n${tail}`;
     } else {
       parts.push(rest.slice(0, cut).trimEnd());
-      rest = tail;
+      rest = rest.slice(cut).trimStart();
     }
   }
   return rest ? [...parts, rest] : parts;

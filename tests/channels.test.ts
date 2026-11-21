@@ -5528,7 +5528,7 @@ test(
       assert.ok(parts.length > 1 && parts.every((part) => part.length <= 4096));
       assert.ok(paragraphs.every((paragraph) => parts.some((part) => part.includes(paragraph))));
 
-      const script = Array.from({ length: 400 }, (_, index) => `const value${index} = ${index};`);
+      const script = Array.from({ length: 400 }, (_, index) => `  const value${index} = ${index};`);
       const fencedReply = `Script:\n\n\`\`\`ts\n${script.join('\n')}\n\`\`\`\n\nDone.`;
       const beforeFenced = sent.length;
       await addReply('channel:telegram:987:123456:10', fencedReply);
@@ -5541,8 +5541,9 @@ test(
         assert.equal(blocks.length, 1, part.slice(0, 80));
         assert.equal((part.match(/^```/gm) ?? []).length, 2);
       }
-      const fencedLines = fencedCode.join('\n').replace(/\\([^\p{L}\p{N}\s])/gu, '$1');
-      assert.ok(script.every((line) => fencedLines.includes(line)));
+      const fencedText = fencedParts.join('\n').replace(/\\([^\p{L}\p{N}\s])/gu, '$1');
+      const fencedOrder = ['Script:', ...script, 'Done.'].map((line) => fencedText.indexOf(line));
+      assert.ok(fencedOrder.every((at, index) => at >= 0 && at > (fencedOrder[index - 1] ?? -1)));
 
       const captionText =
         'Flight (economy) - 123.45 EUR. '.repeat(30) + '\nFinal cancellation deadline: 2026-10-31.';
@@ -5828,14 +5829,20 @@ test(
         `Script:\n\n\`\`\`py\n${script.join('\n')}\n\`\`\`\n\nDone.`,
       );
       await channels.drain();
-      const whatsappCode = sent
+      const whatsappBodies = sent
         .slice(beforeWhatsAppCode)
-        .map(({ body }) => (body.text as { body: string }).body)
-        .filter((body) => body.includes('const value'));
+        .map(({ body }) => (body.text as { body: string }).body);
+      const whatsappCode = whatsappBodies.filter((body) => body.includes('const value'));
       assert.ok(whatsappCode.length > 1 && whatsappCode.every((body) => body.length <= 4096));
       for (const body of whatsappCode) assert.match(body, /```\n[\s\S]*\n```(?:\n\nDone\.)?$/);
       for (const body of whatsappCode) assert.equal((body.match(/```/g) ?? []).length, 2);
-      assert.ok(script.every((line) => whatsappCode.some((body) => body.includes(line))));
+      const whatsappText = whatsappBodies.join('\n');
+      const whatsappOrder = ['Script:', ...script, 'Done.'].map((line) =>
+        whatsappText.indexOf(line),
+      );
+      assert.ok(
+        whatsappOrder.every((at, index) => at >= 0 && at > (whatsappOrder[index - 1] ?? -1)),
+      );
       const providerIds = whatsappParts.map(
         (_, index) => `wamid.fixture-out-${beforeWhatsApp + index + 1}`,
       );
