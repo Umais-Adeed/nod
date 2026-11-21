@@ -2080,6 +2080,8 @@ describe('account routes', () => {
       logged.mock.calls.map((call) => JSON.parse(String(call.arguments[0])).event),
       ['setup_failed', 'setup_failed', 'setup_failed'],
     );
+    const written = JSON.stringify(logged.mock.calls.map((call) => call.arguments));
+    assert.doesNotMatch(written, /synthetic-secret-token|Docker daemon/);
     assert.equal(verifying.record().onboardingCompleted, false);
   });
 
