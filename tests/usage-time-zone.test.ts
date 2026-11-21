@@ -161,12 +161,13 @@ test(
   async () => {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 16);
     const schema = `test_usage_dst_${suffix}`;
+    const bossSchema = `test_usage_dst_boss_${suffix}`;
     const admin = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
     await admin.query(`CREATE SCHEMA ${schema}`);
     const databaseUrl = new URL(process.env.TEST_DATABASE_URL!);
     databaseUrl.searchParams.set('options', `-c search_path=${schema}`);
     process.env.DATABASE_URL = databaseUrl.href;
-    process.env.PGBOSS_SCHEMA = `test_usage_dst_boss_${suffix}`;
+    process.env.PGBOSS_SCHEMA = bossSchema;
     const db = await import('../src/server/db.ts');
     const thread = await import('../src/server/thread.ts');
     const { createLedger } = await import('../src/server/ledger.ts');
@@ -221,7 +222,8 @@ test(
     } finally {
       await thread.boss.stop?.().catch(() => {});
       await db.pool.end().catch(() => {});
-      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.query(`DROP SCHEMA IF EXISTS ${bossSchema} CASCADE`);
       await admin.end();
     }
   },
