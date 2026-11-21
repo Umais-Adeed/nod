@@ -297,7 +297,7 @@ export async function createApp(dependencies: AppDependencies = {}) {
       error instanceof Error
         ? (error as Error & { statusCode?: number; retryable?: boolean; code?: string })
         : undefined;
-    const nullCharacter = known?.code === '22021';
+    const nullCharacter = known?.code === '22021' && /: 0x00$/.test(known.message);
     const status = error instanceof z.ZodError || nullCharacter ? 400 : known?.statusCode || 500;
     const messageTooLong =
       (request.routeOptions.url === '/api/messages' ||
