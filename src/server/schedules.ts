@@ -832,7 +832,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
         ) {
           const page = scheduler.previewSchedule(row.cron!, {
             tz: row.timeZone,
-            count: times.length ? 20 : 2,
+            count: times.length ? Math.min(20, 200 - times.length) : 2,
             from: new Date(times.at(-1) ?? from.getTime()),
           });
           if (!page.length) break;
