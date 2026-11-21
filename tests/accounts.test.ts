@@ -734,9 +734,17 @@ test('the task title editor keeps its draft when Escape cancels an IME candidate
         }),
       );
     });
+  const setValue = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLInputElement.prototype,
+    'value',
+  )!.set!;
+  await act(async () => {
+    setValue.call(input, 'Synthetic draft');
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  });
   for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
     await press(composing);
-    assert.ok(document.querySelector('input'));
+    assert.equal(document.querySelector('input')?.value, 'Synthetic draft');
   }
   await press({});
   assert.equal(document.querySelector('input'), null);
