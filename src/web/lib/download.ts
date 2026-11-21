@@ -1,9 +1,11 @@
-import { ApiError, apiResponse } from './api';
+import { ApiError, apiResponse, responseError } from './api';
 
 export async function downloadExport(path: string, fallbackName: string, what: string) {
   const response = await apiResponse(path, { cache: 'no-store' });
-  if (!response.ok)
-    throw new ApiError(`${what} could not be exported. Try again.`, response.status);
+  if (!response.ok) {
+    const { message, status } = await responseError(response);
+    throw new ApiError(`${what} could not be exported: ${message}`, status);
+  }
   const name =
     /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ??
     fallbackName;
