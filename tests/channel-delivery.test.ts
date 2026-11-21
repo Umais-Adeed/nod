@@ -103,6 +103,45 @@ test('managed connection observations require usable channel configuration', () 
   );
 });
 
+test('model service errors keep the reason from Google arrays, FastAPI details and large JSON bodies', async () => {
+  const { modelServiceError } = await import('../src/providers/model-error.ts');
+  const failure = (body: unknown, status: number, secrets: string[] = []) =>
+    modelServiceError(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+      'Synthetic service',
+      secrets,
+    );
+  assert.equal(
+    (await failure([{ error: { code: 429, message: 'Quota exceeded' } }], 429)).reason,
+    'Quota exceeded',
+  );
+  assert.equal((await failure({ detail: 'Not authenticated' }, 401)).reason, 'Not authenticated');
+  assert.equal(
+    (await failure({ detail: [{ msg: 'field required' }, { msg: 'too long' }] }, 422)).reason,
+    'field required; too long',
+  );
+  const large = await failure(
+    {
+      error: {
+        message: 'context length exceeded for synthetic-secret-key',
+        details: 'x'.repeat(20_000),
+      },
+    },
+    400,
+    ['synthetic-secret-key'],
+  );
+  assert.equal(large.reason, 'context length exceeded for [redacted]');
+  assert.ok(large.message.length < 2100);
+  const plain = await modelServiceError(
+    new Response('private upstream text', { status: 400, statusText: 'Bad Request' }),
+    'Synthetic service',
+  );
+  assert.equal(plain.message, 'Synthetic service failed (HTTP 400): Bad Request');
+});
+
 test('channel verification keeps service failures specific and removes submitted secrets', async () => {
   const { modelServiceError } = await import('../src/providers/model-error.ts');
   const modelError = await modelServiceError(
