@@ -158,7 +158,10 @@ export function webTarget(name: string, params: unknown, redact: (text: string) 
       .replace(/\s+/g, ' ')
       .trim();
     if (!text) return {};
-    const characters = Array.from(text);
+    const characters = Array.from(
+      new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text),
+      ({ segment }) => segment,
+    );
     return {
       detail: characters.length > 40 ? `${characters.slice(0, 39).join('').trimEnd()}…` : text,
     };

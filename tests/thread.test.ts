@@ -14181,6 +14181,8 @@ test('a web search label keeps a known secret out even when operators or quotes 
   assert.doesNotMatch(JSON.stringify(label), /alpha|beta/);
   const long = webTarget('web_search', { query: `${'a'.repeat(38)}😀 tail` }, (text) => text);
   assert.equal(long.detail, `${'a'.repeat(38)}😀…`);
+  const joined = webTarget('web_search', { query: `${'a'.repeat(38)}👩🏽‍💻 tail` }, (text) => text);
+  assert.equal(joined.detail, `${'a'.repeat(38)}👩🏽‍💻…`);
 });
 
 test(
