@@ -134,7 +134,25 @@ test('model service errors keep the reason from Google arrays, FastAPI details a
     ['synthetic-secret-key'],
   );
   assert.equal(large.reason, 'context length exceeded for [redacted]');
-  assert.ok(large.message.length < 2100);
+  assert.equal(
+    large.message,
+    'Synthetic service failed (HTTP 400): context length exceeded for [redacted]',
+  );
+  assert.equal(
+    (await failure({ detail: { status: 'quota_exceeded', message: 'Quota used up' } }, 429)).reason,
+    'Quota used up',
+  );
+  const both = await failure({ code: 'E1', detail: 'Model is loading' }, 503);
+  assert.equal(
+    both.message,
+    'Synthetic service failed (HTTP 503): code: E1; detail: Model is loading',
+  );
+  const bearer = await failure(
+    { error: { message: 'Sent Bearer short-tok and Basic dXNlcjpwYXNz' } },
+    401,
+  );
+  assert.equal(bearer.reason, 'Sent Bearer [redacted] and Basic [redacted]');
+  assert.doesNotMatch(bearer.message, /short-tok|dXNlcjpwYXNz/);
   const plain = await modelServiceError(
     new Response('private upstream text', { status: 400, statusText: 'Bad Request' }),
     'Synthetic service',

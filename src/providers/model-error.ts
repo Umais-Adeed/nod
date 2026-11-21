@@ -25,7 +25,7 @@ export async function modelServiceError(
       result += secret ? '[redacted]' : value[at];
       at += secret?.length ?? 1;
     }
-    return result.replace(/\b(Bearer|Basic)\s+[\w.~+/=-]{16,}/gi, '$1 [redacted]');
+    return result.replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 [redacted]');
   };
   let reason = response.statusText;
   let serviceReason: string | undefined;
@@ -39,13 +39,13 @@ export async function modelServiceError(
     ) {
       const chunks: Uint8Array[] = [];
       let size = 0;
-      while (size <= 16_384) {
+      while (size < 16_384) {
         const { done, value } = await reader.read();
         if (done) break;
+        chunks.push(value.subarray(0, 16_384 - size));
         size += value.length;
-        chunks.push(value);
       }
-      const text = Buffer.concat(chunks).subarray(0, 16_384).toString('utf8');
+      const text = Buffer.concat(chunks).toString('utf8');
       let body: unknown;
       try {
         body = JSON.parse(text);
@@ -65,17 +65,17 @@ export async function modelServiceError(
           ? record.detail
               .flatMap((item) => (typeof item?.msg === 'string' ? [item.msg] : []))
               .join('; ')
-          : record.detail;
+          : (Object(record.detail).message ?? record.detail);
         const fields = detailFields.flatMap((name) =>
           typeof record[name] === 'string' || typeof record[name] === 'number'
             ? [`${name}: ${record[name]}`]
             : [],
         );
-        if (fields.length) reason = fields.join('; ');
-        if (typeof detail === 'string' && detail) {
-          serviceReason ??= detail;
-          if (!fields.length) reason = detail;
-        }
+        const described = typeof detail === 'string' && detail ? detail : undefined;
+        if (fields.length)
+          reason = [...fields, ...(described ? [`detail: ${described}`] : [])].join('; ');
+        else if (described) reason = described;
+        if (described) serviceReason ??= described;
       }
     }
   } catch {
