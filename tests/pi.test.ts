@@ -8938,6 +8938,16 @@ test('model discovery names why it failed instead of a generic retry message', a
     /xAI couldn’t load its models: the connection failed \(ECONNREFUSED\)\./,
   );
   await assert.rejects(
+    native(async () => {
+      throw new TypeError('fetch failed', {
+        cause: new Error('Synthetic name lookup failed. fixture-xai-key'),
+      });
+    }),
+    (error: Error) =>
+      /Synthetic name lookup failed/.test(error.message) &&
+      !error.message.includes('fixture-xai-key'),
+  );
+  await assert.rejects(
     native(async () => new Response('<html>challenge</html>', { status: 200 })),
     /xAI couldn’t load its models: it returned an invalid model list\./,
   );

@@ -275,11 +275,7 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
     const headers: Record<string, string> = credential.key
       ? { Authorization: `Bearer ${credential.key}` }
       : {};
-    const secrets = [credential.url, credential.key ?? ''].flatMap((value) => [
-      value,
-      encodeURIComponent(value),
-      JSON.stringify(value).slice(1, -1),
-    ]);
+    const secrets = [credential.url, credential.key ?? ''];
     const failures: ModelCatalogFailure[] = [];
     let found: { url: string; data: unknown[] } | undefined;
     for (const url of credential.url.endsWith('/v1')
@@ -291,7 +287,7 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
         redirect: 'error',
         signal: AbortSignal.timeout(15000),
       }).catch((error: unknown) => {
-        throw new ModelCatalogError([{ path, detail: discoveryCause(error) }]);
+        throw new ModelCatalogError([{ path, detail: discoveryCause(error, secrets) }]);
       });
       if (!response.ok) {
         const error = await modelServiceError(response, 'Model discovery', secrets);
@@ -747,9 +743,12 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
           .parse(await response.json());
       } catch (cause) {
         if (cause instanceof ModelAuthError || cause instanceof ModelServiceError) throw cause;
-        throw new Error(`Anthropic workspace discovery failed: ${discoveryCause(cause)}.`, {
-          cause,
-        });
+        throw new Error(
+          `Anthropic workspace discovery failed: ${discoveryCause(cause, [credential.key])}.`,
+          {
+            cause,
+          },
+        );
       }
       if (!workspaces.data.length)
         throw new ModelAuthError(

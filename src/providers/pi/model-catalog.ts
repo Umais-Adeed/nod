@@ -1,7 +1,7 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import { ModelAuthError, type ModelCredential } from '../../ports/models.ts';
-import { ModelServiceError, modelServiceError } from '../model-error.ts';
+import { ModelServiceError, modelErrorText, modelServiceError } from '../model-error.ts';
 import {
   cloudflareAccountPattern,
   cloudflareGatewayPattern,
@@ -160,9 +160,10 @@ export function cloudflareCredential(provider: ModelProvider, credential: ModelC
   return credential;
 }
 
-export function discoveryCause(error: unknown) {
+export function discoveryCause(error: unknown, secrets: string[] = []) {
   if (Object(error).name === 'TimeoutError') return 'the request timed out';
   let cause = error;
+  let detail = '';
   for (let depth = 0; depth < 4 && cause instanceof Error; depth++) {
     const code = (cause as Error & { code?: unknown }).code;
     if (
@@ -171,11 +172,15 @@ export function discoveryCause(error: unknown) {
       /^(?:E[A-Z_]+|UND_ERR_[A-Z_]+)$/.test(code)
     )
       return `the connection failed (${code})`;
+    if (cause.message && cause.message !== 'fetch failed') detail = cause.message;
     cause = cause.cause;
   }
+  const reason = modelErrorText(detail, secrets).trim();
   return error instanceof SyntaxError || Object(error).name === 'ZodError'
     ? 'it returned an invalid model list'
-    : 'the connection failed';
+    : reason && reason !== '[redacted]'
+      ? reason.slice(0, 2000)
+      : 'the connection failed';
 }
 
 export async function nativeCatalog(
@@ -187,18 +192,22 @@ export async function nativeCatalog(
   const failed = (cause = 'it returned an invalid model list') =>
     new Error(`${modelProviderNames[provider]} couldn’t load its models: ${cause}. Try again.`);
   const read = async (url: string | URL, headers: Record<string, string>) => {
+    const secrets = [
+      String(url),
+      ...Object.values(headers).map((value) => value.replace(/^Bearer /, '')),
+    ];
     const response = await request(url, {
       headers,
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     }).catch((error: unknown) => {
-      throw failed(discoveryCause(error));
+      throw failed(discoveryCause(error, secrets));
     });
     if (!response.ok) {
       const error = await modelServiceError(
         response,
         `${modelProviderNames[provider]} model discovery`,
-        Object.values(headers).map((value) => value.replace(/^Bearer /, '')),
+        secrets,
       );
       if (
         response.status === 401 ||
@@ -210,7 +219,7 @@ export async function nativeCatalog(
       throw error;
     }
     return (await response.json().catch((error: unknown) => {
-      throw failed(discoveryCause(error));
+      throw failed(discoveryCause(error, secrets));
     })) as unknown;
   };
   const parse = <T>(schema: z.ZodType<T>, value: unknown) => {
