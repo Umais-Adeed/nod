@@ -8,5 +8,6 @@ export function cutText(text: string, limit: number): string {
     if (next > limit) break;
     end = next;
   }
+  if (!end) end = limit - ((text.charCodeAt(limit - 1) & 0xfc00) === 0xd800 ? 1 : 0);
   return text.slice(0, end);
 }

@@ -14256,6 +14256,9 @@ test('a web search label keeps a known secret out even when operators or quotes 
 
 test('shown text is cut on whole characters and never past its limit', () => {
   assert.equal(cutText('short', 10), 'short');
+  assert.equal(cutText(`e${'\u0301'.repeat(200)}`, 120), `e${'\u0301'.repeat(119)}`);
+  assert.equal(cutText(`😀${'\u0301'.repeat(200)}`, 121), `😀${'\u0301'.repeat(119)}`);
+  assert.equal(cutText(`a😀${'\u0301'.repeat(200)}`, 2), 'a');
   for (const emoji of ['😀', '👩🏽‍💻', '🇩🇪']) {
     const head = 'a'.repeat(36);
     const text = `${head}${emoji}${'b'.repeat(20)}`;
