@@ -9353,19 +9353,21 @@ test('cloud connections list only the account’s models and send each key only 
       key: 'fixture-wrong-key',
       region: 'eu-west-1',
     }),
-    /didn’t accept this key/,
+    /Amazon Bedrock model discovery failed \(HTTP 403\).*Synthetic denial/,
   );
   const bedrockFailure = (key: string) =>
     backend.catalog('amazon-bedrock', 'api_key', { type: 'bedrock', key, region: 'eu-west-1' });
   await assert.rejects(
     bedrockFailure('fixture-bedrock-expired'),
     (error: Error) =>
-      /didn’t accept this key.*HTTP 403.*security token \[redacted\] is expired/.test(
+      /Amazon Bedrock model discovery failed \(HTTP 403\).*security token \[redacted\] is expired/.test(
         error.message,
       ) && !error.message.includes('fixture-bedrock-expired'),
   );
   await assert.rejects(bedrockFailure('fixture-bedrock-malformed'), (error: Error) =>
-    /didn’t accept this key.*HTTP 400.*Malformed input request/.test(error.message),
+    /Amazon Bedrock model discovery failed \(HTTP 400\).*Malformed input request/.test(
+      error.message,
+    ),
   );
   const sent = requests.length;
   await assert.rejects(
@@ -9383,14 +9385,14 @@ test('cloud connections list only the account’s models and send each key only 
   assert.ok(vertex.length > 1);
   await assert.rejects(
     backend.catalog('google-vertex', 'api_key', { type: 'api_key', key: 'fixture-wrong-key' }),
-    /didn’t accept this API key/,
+    /Google Vertex AI model discovery failed \(HTTP 400\)/,
   );
   await assert.rejects(
     backend.catalog('google-vertex', 'api_key', {
       type: 'api_key',
       key: 'fixture-vertex-disabled',
     }),
-    /didn’t accept this API key.*HTTP 403.*Vertex AI API is disabled/,
+    /Google Vertex AI model discovery failed \(HTTP 403\).*Vertex AI API is disabled/,
   );
   await assert.rejects(
     backend.catalog('google-vertex', 'api_key', { type: 'api_key', key: 'fixture-vertex-busy' }),
@@ -9411,8 +9413,8 @@ test('cloud connections list only the account’s models and send each key only 
     ['gpt-6.1-sol'],
   );
   for (const [host, pattern] of [
-    ['private', /didn’t accept the key.*HTTP 403.*Public access is disabled/],
-    ['gone', /didn’t accept the key.*HTTP 404.*Resource not found/],
+    ['private', /Azure OpenAI model discovery failed \(HTTP 403\).*Public access is disabled/],
+    ['gone', /Azure OpenAI model discovery failed \(HTTP 404\).*Resource not found/],
   ] as const)
     await assert.rejects(
       backend.catalog('azure', 'api_key', {
@@ -9422,7 +9424,7 @@ test('cloud connections list only the account’s models and send each key only 
         model: 'gpt-6.1-sol',
         deployment: 'fixture-deployment',
       }),
-      pattern,
+      (error: Error) => pattern.test(error.message) && !error.message.includes('didn’t accept'),
     );
   await assert.rejects(
     backend.catalog('azure', 'api_key', {
