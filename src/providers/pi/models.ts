@@ -285,14 +285,12 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
     for (const url of credential.url.endsWith('/v1')
       ? [credential.url]
       : [credential.url, `${credential.url}/v1`]) {
-      const path = url === credential.url ? '/models' : '/v1/models';
       const response = await request(`${url}/models`, {
         headers,
         redirect: 'error',
         signal: AbortSignal.timeout(15000),
-      }).catch((error: unknown) => {
-        throw new ModelCatalogError([{ path, detail: discoveryCause(error) }]);
       });
+      const path = url === credential.url ? '/models' : '/v1/models';
       if (!response.ok) {
         const error = await modelServiceError(response, 'Model discovery', secrets);
         failures.push({ path, status: error.status, detail: error.details ?? '' });
