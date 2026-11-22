@@ -90,6 +90,14 @@ test('notification previews redact configured credentials from the rendered text
     assert.ok(!preview.includes(encodeURIComponent(known)));
     assert.ok(preview.includes('[redacted]'));
   }
+  const marked = 'synthetic*notification*secret';
+  const rendered = await assistantNotificationPreview(
+    { text: `Result: ${marked}` },
+    new Set([marked]),
+    async (text) => text.replaceAll('*', ''),
+  );
+  assert.ok(!rendered.includes('syntheticnotificationsecret'));
+  assert.ok(rendered.includes('[redacted]'));
 });
 
 test('quiet hours suppress the configured interval with inclusive start and exclusive end', () => {

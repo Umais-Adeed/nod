@@ -161,7 +161,7 @@ function plainText(node: Nodes, inline: boolean): string {
       return ' ';
     case 'html': {
       const text = htmlText(parseFragment(node.value));
-      return inline ? text : ` ${text} `;
+      return inline && !/^<br\b/i.test(node.value) ? text : ` ${text} `;
     }
     case 'code':
     case 'definition':

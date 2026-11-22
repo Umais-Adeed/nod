@@ -22,7 +22,9 @@ export async function assistantNotificationPreview(message, secrets = [], render
   }
   let text = '';
   if (typeof message?.text === 'string' && message.text.trim())
-    text = tidy(await render(message.text.slice(0, 16_384)).catch(() => ''));
+    text = tidy(
+      await render(redactPreview(message.text, secrets).slice(0, 16_384)).catch(() => ''),
+    );
   if (!text) {
     const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
     const name =

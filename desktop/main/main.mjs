@@ -676,7 +676,11 @@ async function renderNotificationText(text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
-  if (!response.ok) throw new Error('The notification preview is unavailable.');
+  if (!response.ok) {
+    const error = new Error(`The notification preview failed (HTTP ${response.status}).`);
+    void writeDiagnostic(error.message).catch(() => {});
+    throw error;
+  }
   const body = await response.json();
   if (typeof body?.text !== 'string') throw new Error('The notification preview is unavailable.');
   return body.text;
@@ -686,17 +690,16 @@ async function notifyAssistantMessage(message, threadId) {
   if (!preferences.notifications || !Notification.isSupported() || quitting) return;
   if ([...engineWindows].some((window) => !window.isDestroyed() && window.isFocused())) return;
   const sourceEngine = remoteConnection || engine;
-  const saved = await appPreferences.get();
-  const body = await assistantNotificationPreview(message, knownSecrets, renderNotificationText);
-  if (
+  const blocked = async () =>
     !sourceEngine ||
     (remoteConnection || engine) !== sourceEngine ||
     !preferences.notifications ||
     quitting ||
-    isQuietTime(saved.preferences) ||
-    [...engineWindows].some((window) => !window.isDestroyed() && window.isFocused())
-  )
-    return;
+    isQuietTime((await appPreferences.get()).preferences) ||
+    [...engineWindows].some((window) => !window.isDestroyed() && window.isFocused());
+  if (await blocked()) return;
+  const body = await assistantNotificationPreview(message, knownSecrets, renderNotificationText);
+  if (await blocked()) return;
   const notification = new Notification({
     title: 'Nod',
     icon: notificationIcon,

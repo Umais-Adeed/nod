@@ -495,6 +495,7 @@ test('notification previews read the same Markdown parse as chat and keep only i
     ['Use &lt;b&gt; for bold text', 'Use <b> for bold text'],
     ['Open [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now', 'Open Foo now'],
     ['Check a < b and my_var_name', 'Check a < b and my_var_name'],
+    ['Hello<br>world', 'Hello world'],
     ['Open https://example.test/private?token=synthetic-link-secret now', 'Open example.test now'],
     [
       '## **Your report is ready**\n\nRead [the summary](https://example.test/x), ![chart](https://example.test/c.png) and `review.csv`.\n\n```\nhidden code\n```\n\n<!--hidden comment--><script>hidden script</script>',
