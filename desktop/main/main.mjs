@@ -32,6 +32,7 @@ import {
   createSettingsStore,
   desktopContentPolicy,
   serverOrigin,
+  serverToken,
   setupResource,
 } from './settings.mjs';
 import { createDesktopAnalytics } from './analytics.mjs';
@@ -1774,27 +1775,40 @@ function showConnectionSettings() {
 
 async function checkRemoteConnection(connection) {
   const url = serverOrigin(connection.url);
-  if (typeof connection.token !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(connection.token))
-    throw new Error('Enter the authentication token configured on your server.');
-  knownSecrets.add(connection.token);
+  const token = serverToken(connection.token);
+  knownSecrets.add(token);
   let response;
   try {
     response = await fetch(`${url}/api/session`, {
-      headers: { Authorization: `Bearer ${connection.token}` },
+      headers: { Authorization: `Bearer ${token}` },
       redirect: 'error',
       signal: AbortSignal.timeout(10000),
     });
-  } catch {
-    throw new Error('Could not reach your server. Check its address and HTTPS certificate.');
+  } catch (error) {
+    if (error?.name === 'TimeoutError')
+      throw new Error(
+        'Could not reach your server: no answer in 10 seconds. Check the address and that the server is running.',
+      );
+    const code = [error?.cause?.code, error?.code].find(
+      (value) => typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(value),
+    );
+    throw new Error(
+      `Could not reach your server${code ? ` (${code})` : ''}. Check its address and HTTPS certificate.`,
+    );
   }
-  if (response.status === 401 || response.status === 403)
-    throw new Error('Your server rejected this token. Check its address and authentication token.');
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(
+      response.status === 401 || response.status === 403
+        ? 'Your server rejected this token. Check its address and authentication token.'
+        : `This address did not respond as a Nod server (HTTP ${response.status}).`,
+    );
+  }
   let account;
   try {
     account = await response.json();
   } catch {}
   if (
-    !response.ok ||
     !account ||
     typeof account.user?.id !== 'string' ||
     !account.user.id ||
@@ -1807,7 +1821,7 @@ async function checkRemoteConnection(connection) {
     typeof revision === 'string' && /^(?:0|[1-9]\d{0,18})$/.test(revision) ? revision : null;
   return {
     url,
-    token: connection.token,
+    token,
     owner: account.user.id,
     usageDataRevision,
     analyticsAllowed:
@@ -1884,7 +1898,8 @@ async function saveConnection(input) {
   if (input !== null) {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new Error('Enter your server address and authentication token.');
-    await checkRemoteConnection(input);
+    const connection = await checkRemoteConnection(input);
+    input = { ...input, token: connection.token };
   }
   if (!(await confirmRestart())) return;
   await settings.saveConnection(input);

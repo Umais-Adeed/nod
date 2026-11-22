@@ -1530,6 +1530,96 @@ test('remote MCP falls back to HTTP+SSE only when the server refuses Streamable 
 });
 
 test(
+  'a stopped remote MCP call ends alone and leaves other calls on the shared connection running',
+  { timeout: 10_000 },
+  async (t) => {
+    const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+    const { StreamableHTTPServerTransport } =
+      await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+    const { isInitializeRequest } = await import('@modelcontextprotocol/sdk/types.js');
+    const sessions = new Map<string, InstanceType<typeof StreamableHTTPServerTransport>>();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => (finish = resolve));
+    let started!: () => void;
+    const silentStarted = new Promise<void>((resolve) => (started = resolve));
+    const open = new Set<object>();
+    const server = createServer(async (request, response) => {
+      if (request.method === 'POST') {
+        open.add(response);
+        response.on('close', () => open.delete(response));
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk as Buffer);
+      const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
+      if (body?.method === 'tools/call' && body.params?.name === 'server-error') {
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            error: { code: -32000, message: 'Synthetic server error.' },
+          }),
+        );
+        return;
+      }
+      const existing = sessions.get(String(request.headers['mcp-session-id']));
+      if (existing) {
+        await existing.handleRequest(request, response, body);
+        return;
+      }
+      if (!isInitializeRequest(body)) {
+        response.writeHead(404).end();
+        return;
+      }
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => void sessions.set(id, transport),
+      });
+      const mcp = new McpServer({ name: 'synthetic-shared', version: '1' });
+      mcp.registerTool('long-report', { description: 'Long' }, async () => {
+        await finished;
+        return { content: [{ type: 'text', text: 'synthetic long report' }] };
+      });
+      mcp.registerTool('silent', { description: 'Silent' }, async (extra) => {
+        started();
+        await new Promise((resolve) => extra.signal.addEventListener('abort', resolve));
+        return { content: [] };
+      });
+      await mcp.connect(transport);
+      await transport.handleRequest(request, response, body);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const endpoint = `${origin}/mcp`;
+    const transport = createDiscoveredTransport(ownerFetch(origin), async (value) => value);
+    const headers = { authorization: 'Bearer synthetic-shared-token' };
+    const long = transport.callTool(endpoint, headers, 'long-report', {});
+    long.catch(() => {});
+    const stop = new AbortController();
+    const silent = transport.callTool(endpoint, headers, 'silent', {}, stop.signal);
+    await silentStarted;
+    await assert.rejects(
+      transport.callTool(endpoint, headers, 'server-error', {}),
+      /Synthetic server error\./,
+    );
+    stop.abort(new Error('Synthetic stop.'));
+    await assert.rejects(silent, /Synthetic stop\./);
+    finish();
+    assert.deepEqual(await long, {
+      content: [{ type: 'text', text: 'synthetic long report' }],
+    });
+    for (let wait = 0; open.size && wait < 100; wait++) await delay(10);
+    assert.equal(open.size, 0);
+    assert.deepEqual(await transport.callTool(endpoint, headers, 'long-report', {}), {
+      content: [{ type: 'text', text: 'synthetic long report' }],
+    });
+  },
+);
+
+test(
   'installation identity checkpoints prevent replacement after file loss and recover interrupted first initialization',
   { skip: !process.env.TEST_DATABASE_URL },
   async (t) => {
@@ -3164,6 +3254,94 @@ test('hosted connection attempts fail closed after expiry or invalid startup', a
   }
 });
 
+test(
+  'a sign-in that expires without returning records one timeout',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async (t) => {
+    for (const ending of [
+      'returns late',
+      'returns during expiry',
+      'cancelled late',
+      'returns late after a restart',
+      'cancelled late after a restart',
+      'connected',
+    ] as const)
+      await t.test(ending, async (t) => {
+        const expiries: Array<() => Promise<unknown>> = [];
+        const schedule = globalThis.setTimeout;
+        t.mock.method(globalThis, 'setTimeout', ((
+          callback: () => Promise<unknown>,
+          delay?: number,
+          ...rest: unknown[]
+        ) =>
+          delay === 601_000
+            ? (expiries.push(callback), { unref() {} })
+            : schedule(callback, delay, ...rest)) as unknown as typeof setTimeout);
+        const captured: import('../src/server/analytics.ts').AnalyticsEvent[] = [];
+        const changes = () =>
+          captured.flatMap((entry) =>
+            entry.event === 'connection_changed'
+              ? [[entry.properties.status, entry.properties.failure_reason]]
+              : [],
+          );
+        const f = await appsFixture(t, {}, { analytics: (event) => captured.push(event) });
+        let app: Pick<typeof f.app, 'inject'> = f.app;
+        const started = await f.app.inject({
+          method: 'POST',
+          url: '/api/apps/gmail/connect',
+          payload: { returnTo: 'window' },
+        });
+        assert.equal(started.statusCode, 200, started.body);
+        assert.equal(expiries.length, 1);
+        const callback = new URL(f.callbacks.at(-1)!);
+        callback.searchParams.set('account', [...f.accounts.keys()].at(-1)!);
+        const finish = () => app.inject({ url: callback.pathname + callback.search });
+        if (ending === 'connected') {
+          assert.equal(
+            new URL((await finish()).headers.location!).searchParams.get('connection'),
+            'connected',
+          );
+          await expiries[0]!();
+          assert.deepEqual(changes(), [
+            ['started', undefined],
+            ['connected', undefined],
+          ]);
+          return;
+        }
+        await f.pool.query("UPDATE app_connections SET callback_expires=now()-interval '1 second'");
+        const recording = expiries[0]!();
+        const expired = [
+          ['started', undefined],
+          ['failed', 'timeout'],
+        ];
+        if (ending !== 'returns during expiry') {
+          await recording;
+          assert.deepEqual(changes(), expired);
+        }
+        if (ending.endsWith('after a restart')) app = await f.restart();
+        if (ending.startsWith('cancelled late'))
+          assert.equal(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/api/apps/setup-cancel',
+                payload: {
+                  hash: createHash('sha256').update(new URL(started.json().url).href).digest('hex'),
+                },
+              })
+            ).statusCode,
+            200,
+          );
+        assert.equal(
+          new URL((await finish()).headers.location!).searchParams.get('connection'),
+          'expired',
+        );
+        await recording;
+        assert.deepEqual(changes(), expired);
+      });
+  },
+);
+
 test('connection bridges record the step where an expired attempt stopped', async (t) => {
   const brokerOrigin = 'https://proxy.example.test';
   const pair = `${brokerOrigin}/v2/connect/pair?ticket=synthetic-expiry`;
@@ -3193,8 +3371,8 @@ test('connection bridges record the step where an expired attempt stopped', asyn
     for (const [step, reached] of [
       ['open', 0],
       ['start', 1],
-      ['consent', 2],
-      ['callback', 3],
+      ['pair', 2],
+      ['consent', 3],
       [undefined, 4],
     ] as const) {
       const id = randomBytes(32).toString('base64url');
@@ -5241,7 +5419,7 @@ async function appsFixture(
       return JSON.parse(String(body));
     },
   };
-  const service = await createIntegrations(pool, {
+  const options: Parameters<typeof createIntegrations>[1] = {
     mailCheck: async (emails) => emails.map(() => false),
     ...listing,
     ownerId: 'local-development',
@@ -5253,8 +5431,15 @@ async function appsFixture(
         wakes.push(id);
       }),
     settle: async () => settles++,
-  });
+  };
+  const service = await createIntegrations(pool, options);
   service.registerRoutes(app);
+  async function restart() {
+    const restarted = Fastify();
+    (await createIntegrations(pool, options)).registerRoutes(restarted);
+    t.after(() => restarted.close());
+    return restarted;
+  }
   t.after(async () => {
     await app.close();
     await pool.end();
@@ -5291,6 +5476,7 @@ async function appsFixture(
     wakes,
     settles: () => settles,
     callbacks,
+    restart,
   };
 }
 

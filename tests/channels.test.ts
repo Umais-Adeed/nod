@@ -232,6 +232,11 @@ test('contact previews read vCard 2.1, 3.0 and 4.0 without treating field values
     contactCards('BEGIN:VCARD\r\nFN:First\r\nBEGIN:VCARD\r\nFN:Second\r\nEND:VCARD'),
     [],
   );
+  const escaped = contactCards(
+    'BEGIN:VCARD\r\nFN:Synthetic\r\nTITLE:C:\\\\new\\\\\r\nORG:Line\\nOne\\NTwo\\, \\;\r\nEND:VCARD',
+  )[0];
+  assert.equal(escaped.title, 'C:\\new\\');
+  assert.equal(escaped.organization, 'Line\nOne\nTwo, ;');
 });
 
 const vcardOf = (...lines: string[]) => ['BEGIN:VCARD', ...lines, 'END:VCARD'].join('\r\n');
@@ -1253,7 +1258,7 @@ test(
                 ],
                 async attachmentFailure(names) {
                   notices++;
-                  assert.deepEqual(names, [file.name]);
+                  assert.deepEqual(names, [{ name: file.name }]);
                   return `The file ${file.name} is available in Nod.`;
                 },
               });
@@ -1292,7 +1297,7 @@ test(
                 attachment('available.png', 'image/png', 'available image'),
               ],
               async attachmentFailure(names) {
-                assert.deepEqual(names, ['missing.png']);
+                assert.deepEqual(names, [{ name: 'missing.png' }]);
                 return 'The missing.png file is available in Nod.';
               },
             });
@@ -1911,7 +1916,7 @@ test(
       threadId: 'telegram:123456',
       replyToMessageId: '123456:7',
       text: `Schedule instruction:\n\n\`\`\`\n${prompt}\n\`\`\`\n\nCreate this schedule?`,
-      approval: true as const,
+      approval: { approve: 'Zeitplan erstellen', decline: 'Abbrechen' },
     };
     try {
       assert.deepEqual(await transport.post(approval), {
@@ -1926,9 +1931,12 @@ test(
       assert.equal(Object(sent.reply_parameters).message_id, 7);
       assert.deepEqual(
         Object(sent.reply_markup).inline_keyboard[0].map(
-          (button: { callback_data: string }) => button.callback_data,
+          (button: { text: string; callback_data: string }) => [button.text, button.callback_data],
         ),
-        ['nod:approval:yes', 'nod:approval:no'],
+        [
+          ['Zeitplan erstellen', 'nod:approval:yes'],
+          ['Abbrechen', 'nod:approval:no'],
+        ],
       );
       rejectMarkdown = true;
       const plain = await transport.post(approval);
@@ -2156,6 +2164,178 @@ test('Telegram media keeps native replies and checks the sender before any downl
     0,
   );
   assert.equal(requests.length, 0);
+});
+
+test('Telegram refusing a file still delivers the reply and passes on its reason, while an unclear failure stays unconfirmed', async () => {
+  const sent: { method: string; text?: string }[] = [];
+  let failure: { method: string; status: number } | undefined;
+  const respond = async (input: string | URL | Request, init?: RequestInit) => {
+    const method = String(input).split('/').at(-1)!;
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+    sent.push({ method, text: body.text });
+    if (failure?.method === method)
+      return Response.json(
+        { ok: false, error_code: failure.status, description: 'Bad Request: fixture refusal' },
+        { status: failure.status },
+      );
+    return Response.json({
+      ok: true,
+      result: { message_id: sent.length + 100, date: 1, chat: { id: 123456, type: 'private' } },
+    });
+  };
+  const original = globalThis.fetch;
+  globalThis.fetch = respond as typeof fetch;
+  try {
+    const state = {
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }), release() {} }),
+      on() {},
+      end: async () => {},
+    };
+    const transport = createChatSdkTransport(state as unknown as pg.Pool, fixtureEnv, {
+      fetch: respond,
+    });
+    const file = (name: string, mimeType: string, content: string | Buffer) => ({
+      name,
+      mimeType,
+      size: Buffer.from(content).length,
+      read: async () => new Uint8Array(Buffer.from(content)),
+    });
+    const contact =
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Synthetic Contact\r\nTEL:+34600000000\r\nEND:VCARD';
+    const cases = [
+      ['sendPhoto', file('page.png', 'image/png', Buffer.from('89504e470d0a1a0a', 'hex'))],
+      ['sendVoice', file('reply.ogg', 'audio/ogg', 'OggS fixture voice')],
+      ['sendContact', file('contact.vcf', 'text/vcard', contact)],
+    ] as const;
+    for (const [method, attachment] of cases) {
+      for (const status of [400, 401, 403, 429, 502]) {
+        failure = { method, status };
+        sent.length = 0;
+        const notices: { name: string; reason?: string }[][] = [];
+        const post = transport.post({
+          channelId: 'telegram',
+          accountId: '987',
+          threadId: 'telegram:123456',
+          text: 'Here is the answer.',
+          attachments: [attachment],
+          async attachmentFailure(names) {
+            notices.push(names);
+            return `The file ${names[0].name} is in Nod.`;
+          },
+        });
+        if (status === 400) {
+          const result = await post;
+          const messages = sent.filter((call) => call.method === 'sendMessage');
+          assert.ok(
+            messages.some((call) => call.text?.includes('Here is the answer')),
+            method,
+          );
+          assert.ok(
+            messages.some((call) => call.text?.includes('is in Nod')),
+            method,
+          );
+          assert.deepEqual(
+            notices,
+            [[{ name: attachment.name, reason: 'Bad Request: fixture refusal' }]],
+            method,
+          );
+          assert.equal(result.ids?.length, messages.length, method);
+        } else {
+          await assert.rejects(post, /delivery was not confirmed/, method);
+          assert.deepEqual(notices, [], method);
+          assert.ok(
+            sent.every((call) => call.method !== 'sendMessage' || !call.text?.includes('in Nod')),
+            method,
+          );
+        }
+      }
+    }
+    failure = undefined;
+    sent.length = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/sendPhoto')) throw new TypeError('fetch failed');
+      return respond(input, init);
+    }) as typeof fetch;
+    await assert.rejects(
+      transport.post({
+        channelId: 'telegram',
+        accountId: '987',
+        threadId: 'telegram:123456',
+        text: 'Here is the answer.',
+        attachments: [cases[0][1]],
+        attachmentFailure: async () => 'The file is in Nod.',
+      }),
+      /delivery was not confirmed/,
+    );
+    assert.ok(sent.every((call) => call.method !== 'sendMessage'));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('WhatsApp Cloud API never posts an empty text body before a file or a failed-file notice', async (t) => {
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  const bodies: { type: string; text?: { body: string } }[] = [];
+  t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).startsWith('https://graph.facebook.com/'))
+      throw new Error('Unexpected fixture provider call.');
+    if (String(input).endsWith('/media')) return Response.json({ id: 'fixture-media' });
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ messages: [{ id: `wamid.fixture-${bodies.length}` }] });
+  });
+  const idle = { rows: [], rowCount: 0 };
+  const pool = {
+    query: async () => idle,
+    connect: async () => ({ query: async () => idle, release() {} }),
+    on() {},
+    end: async () => {},
+  } as unknown as pg.Pool;
+  const transport = createChatSdkTransport(pool, fixtureEnv);
+  const target = {
+    channelId: 'whatsapp',
+    accountId: '555000',
+    threadId: 'whatsapp:555000:351910000000',
+  };
+  const image = {
+    name: 'chart.png',
+    mimeType: 'image/png',
+    size: png.length,
+    read: async () => new Uint8Array(png),
+  };
+  const recording = {
+    name: 'reply.wav',
+    mimeType: 'audio/wav',
+    size: 10,
+    read: async () => new Uint8Array(10),
+  };
+  await transport.post({ ...target, text: '', attachments: [image] });
+  assert.deepEqual(
+    bodies.map((body) => body.type),
+    ['image'],
+  );
+  bodies.length = 0;
+  await assert.rejects(
+    transport.post({
+      ...target,
+      text: '',
+      attachments: [recording],
+      attachmentFailure: async () => undefined,
+    }),
+    /Channel delivery was not confirmed/,
+  );
+  assert.equal(bodies.length, 0);
+  bodies.length = 0;
+  await transport.post({
+    ...target,
+    text: '',
+    attachments: [recording],
+    attachmentFailure: async () => 'The file is in Nod.',
+  });
+  assert.deepEqual(
+    bodies.map((body) => body.text?.body),
+    ['The file is in Nod.'],
+  );
 });
 
 test('Telegram downloads stop at 20 MB whatever size the sender, Bot API or file server reports', async () => {
@@ -5314,6 +5494,20 @@ test(
         [ownerMessage],
       );
       assert.deepEqual(await react('👍'), { status: 'updated' });
+      const nextMessage = randomUUID();
+      await pool.query(
+        "INSERT INTO messages(id,owner_id,role,text,thread_id) VALUES($1,'local-development','user','Synthetic context',$2)",
+        [nextMessage, threadId],
+      );
+      assert.deepEqual(
+        await reactions.react({
+          threadId,
+          turnId: reactionTurn,
+          messageId: nextMessage,
+          reaction: '👍',
+        }),
+        { status: 'updated' },
+      );
       failReaction = true;
       assert.deepEqual(await react(null), { status: 'skipped', reason: 'delivery_failed' });
       assert.equal((await storedReaction()).assistant_reaction, '👍');
