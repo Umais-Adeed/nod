@@ -8887,7 +8887,8 @@ test('native provider discovery uses owned keys, bounded Google pagination and t
   await assert.rejects(
     backend.catalog('google', 'api_key', { type: 'api_key', key: 'fixture-rejected-key' }),
     (error: Error) =>
-      /didn’t accept/.test(error.message) && !error.message.includes('fixture-rejected-key'),
+      /Google Gemini model discovery failed.*HTTP 400/.test(error.message) &&
+      !/didn’t accept|fixture-rejected-key/.test(error.message),
   );
   assert.equal(new URL(calls[1]).searchParams.get('private'), null);
   const before = calls.length;
@@ -8943,6 +8944,18 @@ test('model discovery names why it failed instead of a generic retry message', a
   await assert.rejects(
     native(async () => Response.json({ models: [] })),
     /xAI couldn’t load its models: it returned an invalid model list\./,
+  );
+  await assert.rejects(
+    native(async () =>
+      Response.json(
+        { error: { message: 'Access is restricted to a private network. fixture-xai-key' } },
+        { status: 403 },
+      ),
+    ),
+    (error: Error) =>
+      /xAI model discovery failed.*HTTP 403.*Access is restricted to a private network/s.test(
+        error.message,
+      ) && !/didn’t accept|fixture-xai-key/.test(error.message),
   );
   await assert.rejects(
     createPiModelBackend({
@@ -11611,7 +11624,9 @@ test('Anthropic workspace discovery offers named choices and separates retryable
     ...[400, 401, 403, 404].map((status) => ({
       name: `discovery status ${status}`,
       manual: true,
-      response: () => Response.json({ error: { message: key } }, { status }),
+      status,
+      response: () =>
+        Response.json({ error: { message: `Synthetic workspace denial ${key}` } }, { status }),
     })),
     ...[429, 500, 503].map((status) => ({
       name: `discovery status ${status}`,
@@ -11657,6 +11672,10 @@ test('Anthropic workspace discovery offers named choices and separates retryable
             assert.ok(!(error instanceof ModelAuthError));
             if (scenario.status) assert.ok(error.message.includes(`HTTP ${scenario.status}`));
             else assert.ok(error.cause instanceof Error);
+          }
+          if (scenario.status) {
+            assert.ok(error.message.includes(`HTTP ${scenario.status}`));
+            if (scenario.manual) assert.match(error.message, /Synthetic workspace denial/);
           }
           assert.ok(!error.message.includes(key));
           assert.ok(!JSON.stringify(error).includes(key));

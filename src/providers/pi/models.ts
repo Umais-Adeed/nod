@@ -714,15 +714,14 @@ export function createPiModelBackend(options: { fetch?: typeof fetch } = {}): Mo
           },
         );
         if (!response.ok) {
-          if ([400, 401, 403, 404].includes(response.status)) {
-            await response.body?.cancel();
-            throw new ModelAuthError(
-              'Nod couldn’t discover a workspace for this key. Enter its Workspace ID from the Claude Console.',
-            );
-          }
-          throw await modelServiceError(response, 'Anthropic workspace discovery', [
+          const error = await modelServiceError(response, 'Anthropic workspace discovery', [
             credential.key,
           ]);
+          if ([400, 401, 403, 404].includes(response.status))
+            throw new ModelAuthError(
+              `${error.message} Enter its Workspace ID from the Claude Console.`,
+            );
+          throw error;
         }
         workspaces = z
           .object({

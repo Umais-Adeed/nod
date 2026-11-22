@@ -165,7 +165,11 @@ export function discoveryCause(error: unknown) {
   let cause = error;
   for (let depth = 0; depth < 4 && cause instanceof Error; depth++) {
     const code = (cause as Error & { code?: unknown }).code;
-    if (typeof code === 'string' && /^(?:E[A-Z_]+|UND_ERR_[A-Z_]+)$/.test(code))
+    if (
+      typeof code === 'string' &&
+      code.length <= 64 &&
+      /^(?:E[A-Z_]+|UND_ERR_[A-Z_]+)$/.test(code)
+    )
       return `the connection failed (${code})`;
     cause = cause.cause;
   }
@@ -182,12 +186,6 @@ export async function nativeCatalog(
 ): Promise<Model<Api>[]> {
   const failed = (cause = 'it returned an invalid model list') =>
     new Error(`${modelProviderNames[provider]} couldn’t load its models: ${cause}. Try again.`);
-  const denied = () =>
-    new ModelAuthError(
-      provider === 'cloudflare-ai-gateway'
-        ? 'Cloudflare couldn’t read this gateway. Check its Account ID, Gateway ID and token’s AI Gateway Read permission.'
-        : `${modelProviderNames[provider]} didn’t accept this API key. Check its permissions and try again.`,
-    );
   const read = async (url: string | URL, headers: Record<string, string>) => {
     const response = await request(url, {
       headers,
@@ -208,7 +206,7 @@ export async function nativeCatalog(
         (provider === 'google' && response.status === 400) ||
         (provider === 'cloudflare-ai-gateway' && response.status === 404)
       )
-        throw new ModelAuthError(`${denied().message} ${error.message}`);
+        throw new ModelAuthError(error.message);
       throw error;
     }
     return (await response.json().catch((error: unknown) => {
