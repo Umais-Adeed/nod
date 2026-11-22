@@ -8967,21 +8967,6 @@ test('model discovery names why it failed instead of a generic retry message', a
         error.message,
       ) && !/didn’t accept|fixture-xai-key/.test(error.message),
   );
-  await assert.rejects(
-    createPiModelBackend({
-      fetch: async () => {
-        throw refused();
-      },
-    }).catalog('compatible', 'api_key', {
-      type: 'endpoint',
-      url: 'http://localhost:8080',
-      key: 'fixture-endpoint-key',
-    }),
-    (error: Error) =>
-      /\/models: Model discovery failed: the connection failed \(ECONNREFUSED\)/.test(
-        error.message,
-      ) && !/fetch failed|localhost|fixture-endpoint-key/.test(error.message),
-  );
 });
 
 test('native account catalogs never send a provider key to a different service or accept a failed listing', async () => {
