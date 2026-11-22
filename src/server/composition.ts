@@ -188,7 +188,7 @@ import {
 } from './redaction.ts';
 import { createLedger, limitsInput } from './ledger.ts';
 import { createActivityLog } from './activity-log.ts';
-import { actionTarget } from './action-presentation.ts';
+import { actionTarget, objectIds, recordedTitle } from './action-presentation.ts';
 import { usageFileName, usagePdf } from './usage-report.ts';
 import { buildFeedbackReport, type FeedbackReportOptions } from './bug-report.ts';
 import { registerFeedback } from './feedback.ts';
@@ -1901,6 +1901,7 @@ async function initializeApplication(
                           action,
                           provenance.basis ?? { kind: 'approved' },
                           actionTarget(action, args, provenance.details),
+                          objectIds(result),
                         );
                         return privateEmailResult(
                           (
@@ -3200,7 +3201,19 @@ async function initializeApplication(
             verifiedCalendarRevision = current.revision;
             verifiedInstructionRevision = verdict.instructionRevision;
           }
+          const earlierActions = await ledger.earlierActions(
+            turn.threadId,
+            objectIds(prepared, ''),
+          );
           return {
+            ...(earlierActions.length
+              ? {
+                  earlierActions: earlierActions.map((earlier) => ({
+                    action: recordedTitle(earlier.action),
+                    target: earlier.target,
+                  })),
+                }
+              : {}),
             ...(verdict.confirm ? { reason: verdict.reason } : {}),
             ...(account
               ? {
@@ -3253,6 +3266,7 @@ async function initializeApplication(
               action,
               verdict.confirm ? { kind: 'approved' } : verdict.basis,
               actionTarget(action, prepared),
+              objectIds(result),
             );
             return result;
           },
@@ -3579,7 +3593,10 @@ async function initializeApplication(
       clearTimeout(timer);
     }
   }
-  app.addHook('onReady', async () => activity.start());
+  app.addHook('onReady', async () => {
+    void discovered.servers().catch((error) => logFailure('mcp_tool_list_preload', error));
+    return activity.start();
+  });
   app.addHook('onClose', async () => {
     stopConnectionInventory();
     const failures: unknown[] = [];

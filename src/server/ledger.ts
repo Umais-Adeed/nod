@@ -325,6 +325,7 @@ export function createLedger({
     ALTER TABLE app_actions ADD COLUMN IF NOT EXISTS basis jsonb;
     ALTER TABLE app_actions ADD COLUMN IF NOT EXISTS target text;
     ALTER TABLE app_actions ADD COLUMN IF NOT EXISTS parent_run_id uuid;
+    ALTER TABLE app_actions ADD COLUMN IF NOT EXISTS refs text[];
     CREATE INDEX IF NOT EXISTS app_actions_owner_time ON app_actions(owner_id,created_at);
     CREATE INDEX IF NOT EXISTS app_actions_turn ON app_actions(turn_id);
     CREATE TABLE IF NOT EXISTS spending_limits (
@@ -681,10 +682,16 @@ export function createLedger({
     };
   }
 
-  function action(turnId: string, name: string, basis: TrustBasis, target?: string) {
+  function action(
+    turnId: string,
+    name: string,
+    basis: TrustBasis,
+    target?: string,
+    refs?: string[],
+  ) {
     return save(
-      `INSERT INTO app_actions(owner_id,turn_id,action,basis,target,parent_run_id)
-       SELECT $1,id,$3,$4,$5,$6 FROM turns WHERE id=$2 AND owner_id=$1`,
+      `INSERT INTO app_actions(owner_id,turn_id,action,basis,target,parent_run_id,refs)
+       SELECT $1,id,$3,$4,$5,$6,$7 FROM turns WHERE id=$2 AND owner_id=$1`,
       [
         ownerId,
         turnId,
@@ -692,8 +699,21 @@ export function createLedger({
         JSON.stringify(basis),
         target?.slice(0, 300) ?? null,
         activeExecution.getStore()?.parentRunId ?? null,
+        refs?.length ? refs : null,
       ],
     );
+  }
+
+  async function earlierActions(threadId: string, ids: string[]) {
+    if (!ids.length) return [];
+    const { rows } = await pool.query<{ action: string; target: string }>(
+      `SELECT a.action, a.target FROM app_actions a JOIN turns t ON t.id=a.turn_id
+       WHERE a.owner_id=$1 AND t.thread_id=$2 AND a.refs && $3::text[]
+         AND a.target IS NOT NULL AND a.created_at > now() - interval '7 days'
+       ORDER BY a.created_at DESC LIMIT 5`,
+      [ownerId, threadId, ids],
+    );
+    return rows;
   }
 
   function speech(base: SpeechProvider): SpeechProvider {
@@ -1009,16 +1029,20 @@ export function createLedger({
       : '';
     const priced = `count(${sampleCost})=count(*) AND (sum(${sampleCost})>0 ${zeroWithTokens})
       AND count(*) FILTER (WHERE ${unpricedZero})=0`;
-    const { rows } = await pool.query<WorkUsage & { recordedUsd: number }>(
-      `WITH recent AS (
-        SELECT m.turn_id FROM model_usage m JOIN turns u ON u.id=m.turn_id AND u.owner_id=m.owner_id
-        WHERE m.owner_id=$1 AND u.status='succeeded' GROUP BY m.turn_id
+    const { rows } = await pool.query<WorkUsage & { recordedUsd: number; work: boolean }>(
+      `WITH priced AS (
+        SELECT m.turn_id,(u.source IN ('task','schedule') OR u.task_id IS NOT NULL) AS work,
+          row_number() OVER (PARTITION BY u.source IN ('task','schedule') OR u.task_id IS NOT NULL
+            ORDER BY max(m.created_at) DESC,m.turn_id DESC) AS position
+        FROM model_usage m JOIN turns u ON u.id=m.turn_id AND u.owner_id=m.owner_id
+        WHERE m.owner_id=$1 AND u.status='succeeded' GROUP BY m.turn_id,u.source,u.task_id
         HAVING ${priced}
-        ORDER BY max(m.created_at) DESC,m.turn_id DESC LIMIT 20
-      ), candidates AS (
-        SELECT turn_id FROM recent UNION ALL SELECT $2::uuid WHERE NOT EXISTS (SELECT 1 FROM recent)
+      ), recent AS (SELECT turn_id,work FROM priced WHERE position<=20),
+      candidates AS (
+        SELECT turn_id,work FROM recent
+        UNION ALL SELECT $2::uuid,false WHERE NOT EXISTS (SELECT 1 FROM recent)
       )
-      SELECT sum(${sampleCost})::float8 AS "recordedUsd",${columns}
+      SELECT sum(${sampleCost})::float8 AS "recordedUsd",bool_or(c.work) AS work,${columns}
       FROM model_usage m JOIN candidates c ON c.turn_id=m.turn_id
       WHERE m.owner_id=$1 GROUP BY m.turn_id
       HAVING ${priced}`,
@@ -1464,6 +1488,7 @@ export function createLedger({
     speech,
     attributeMediaUsage,
     action,
+    earlierActions,
     limitReached,
     reachedLimit,
     checkIn,

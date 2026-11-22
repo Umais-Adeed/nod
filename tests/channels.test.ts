@@ -232,6 +232,11 @@ test('contact previews read vCard 2.1, 3.0 and 4.0 without treating field values
     contactCards('BEGIN:VCARD\r\nFN:First\r\nBEGIN:VCARD\r\nFN:Second\r\nEND:VCARD'),
     [],
   );
+  const escaped = contactCards(
+    'BEGIN:VCARD\r\nFN:Synthetic\r\nTITLE:C:\\\\new\\\\\r\nORG:Line\\nOne\\NTwo\\, \\;\r\nEND:VCARD',
+  )[0];
+  assert.equal(escaped.title, 'C:\\new\\');
+  assert.equal(escaped.organization, 'Line\nOne\nTwo, ;');
 });
 
 const vcardOf = (...lines: string[]) => ['BEGIN:VCARD', ...lines, 'END:VCARD'].join('\r\n');
@@ -5489,6 +5494,20 @@ test(
         [ownerMessage],
       );
       assert.deepEqual(await react('👍'), { status: 'updated' });
+      const nextMessage = randomUUID();
+      await pool.query(
+        "INSERT INTO messages(id,owner_id,role,text,thread_id) VALUES($1,'local-development','user','Synthetic context',$2)",
+        [nextMessage, threadId],
+      );
+      assert.deepEqual(
+        await reactions.react({
+          threadId,
+          turnId: reactionTurn,
+          messageId: nextMessage,
+          reaction: '👍',
+        }),
+        { status: 'updated' },
+      );
       failReaction = true;
       assert.deepEqual(await react(null), { status: 'skipped', reason: 'delivery_failed' });
       assert.equal((await storedReaction()).assistant_reaction, '👍');
