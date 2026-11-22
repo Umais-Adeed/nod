@@ -65,6 +65,7 @@ import type { createChatVerification } from './chat-verification.ts';
 import { registerWorkAdmission, type WorkAdmission } from './work-admission.ts';
 import { registerAnalyticsRoutes, snapshotAnalytics, type CaptureAnalytics } from './analytics.ts';
 import { messagePreview } from './message-preview.ts';
+import { validateRequestText } from './request-text.ts';
 
 const messageFields = `m.id,m.role,m.text,CASE WHEN m.role='user' THEN m.display_text END AS "displayText",m.audio_caption AS "audioCaption",m.turn_id AS "turnId",m.created_at AS "createdAt",m.attachments,m.stream_id AS "streamId",m.reaction,m.assistant_reaction AS "assistantReaction",m.reply_to_message_id AS "replyToMessageId",m.suggestions,m.presentation,m.answer_choices AS "answerChoices",(${pendingAnswerChoicesSql}) AS "answerChoicesPending",
  (m.role='user' AND (m.approval_answer IS NOT NULL OR (m.question_answer IS NOT NULL AND m.text<>'' AND jsonb_array_length(m.attachments)=0))) AS "cardAnswer",
@@ -294,21 +295,7 @@ export async function createApp(dependencies: AppDependencies = {}) {
         },
   );
   app.addHook('preValidation', async (request) => {
-    const pending = [request.body, request.query, request.params];
-    while (pending.length) {
-      const value = pending.pop();
-      if (typeof value === 'string') {
-        if (value.includes('\0'))
-          throw Object.assign(
-            new Error('Text cannot contain a null character (U+0000). Remove it and try again.'),
-            { statusCode: 400 },
-          );
-      } else if (Array.isArray(value)) {
-        for (const item of value) pending.push(item);
-      } else if (value && typeof value === 'object' && !ArrayBuffer.isView(value)) {
-        for (const [key, item] of Object.entries(value)) pending.push(key, item);
-      }
-    }
+    validateRequestText([request.body, request.query, request.params]);
   });
   if (desktopAccess && dependencies.admission) registerWorkAdmission(app, dependencies.admission);
   app.setErrorHandler((error, request, reply) => {

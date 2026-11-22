@@ -902,6 +902,15 @@ test(
           );
           assert.equal(overAudioText.statusCode, 400);
           assert.equal(overAudioText.json().code, 'message_too_long');
+          const nullAudioText = await isolated.inject(
+            audioRequest({
+              text: 'Synthetic\u0000text',
+              clientMessageId: randomUUID(),
+              threadId,
+            }),
+          );
+          assert.equal(nullAudioText.statusCode, 400);
+          assert.match(nullAudioText.json().error, /null character/);
           assert.equal(
             (
               await isolated.inject({
