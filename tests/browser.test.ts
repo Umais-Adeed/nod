@@ -221,7 +221,7 @@ test(
         [randomUUID(), nextTurnId],
       );
       const fallback = (await request('/api/browser')).json();
-      assert.equal(fallback.currentBrowser.threadId, next.id);
+      assert.equal(fallback.currentBrowser.browserId, next.id);
 
       fail = false;
       const click = { type: 'mouse', event: 'down', x: 0.5, y: 0.25, button: 'left' };
@@ -1353,7 +1353,8 @@ async function runtimeFixture(
   const runtime = createAgentRuntime({ agent, computer, workspace: fakeWorkspace() });
   const context: RuntimeContext = {
     threadId,
-    sessionId: threadId,
+    sessionId: randomUUID(),
+    background: true,
     turnId: randomUUID(),
     prompt: 'Open the synthetic destination after dismissing its covering dialog.',
     history: [],
@@ -3952,6 +3953,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     '/media/private-owner/BACKUP/Medical Notes/scan.pdf does not exist.',
     '/run/media/private-owner/USB/Tax Return/form.pdf does not exist.',
     'Book a slot at calendly.com/synthetic-booker/30min please.',
+    'Connection to synthetic-archive.helsinki failed with HTTP 503.',
     'Profile www.example.com/in/synthetic-profile?ref=private-ref#private-anchor failed.',
     'Redirect via unlisted.notatld/next?to=example.com/synthetic-hidden failed.',
     'Mirror downloads.example.com:8443/synthetic-mirror?key=synthetic-query failed.',
@@ -4018,6 +4020,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'Tax Return',
     'BACKUP',
     'synthetic-booker',
+    'synthetic-archive.helsinki',
     '30min',
     'synthetic-profile',
     'private-ref',
@@ -4083,6 +4086,7 @@ test('rich feedback redaction handles embedded JSON, identifying addresses, enco
     'open [path] (ENOENT)',
     "can't load [path] from [url]",
     'HTTP 418 kept',
+    'Connection to [host] failed with HTTP 503.',
   ])
     assert.ok(encoded.includes(useful), useful);
   const { timeZoneRegion } = await import('../src/shared/date-locale.ts');

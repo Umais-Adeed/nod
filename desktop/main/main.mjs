@@ -1784,17 +1784,31 @@ async function checkRemoteConnection(connection) {
       redirect: 'error',
       signal: AbortSignal.timeout(10000),
     });
-  } catch {
-    throw new Error('Could not reach your server. Check its address and HTTPS certificate.');
+  } catch (error) {
+    if (error?.name === 'TimeoutError')
+      throw new Error(
+        'Could not reach your server: no answer in 10 seconds. Check the address and that the server is running.',
+      );
+    const code = [error?.cause?.code, error?.code].find(
+      (value) => typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(value),
+    );
+    throw new Error(
+      `Could not reach your server${code ? ` (${code})` : ''}. Check its address and HTTPS certificate.`,
+    );
   }
-  if (response.status === 401 || response.status === 403)
-    throw new Error('Your server rejected this token. Check its address and authentication token.');
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(
+      response.status === 401 || response.status === 403
+        ? 'Your server rejected this token. Check its address and authentication token.'
+        : `This address did not respond as a Nod server (HTTP ${response.status}).`,
+    );
+  }
   let account;
   try {
     account = await response.json();
   } catch {}
   if (
-    !response.ok ||
     !account ||
     typeof account.user?.id !== 'string' ||
     !account.user.id ||
