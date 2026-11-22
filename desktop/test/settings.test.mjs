@@ -38,6 +38,7 @@ import {
   createSettingsStore,
   desktopContentPolicy,
   serverOrigin,
+  serverToken,
   setupResource,
 } from '../main/settings.mjs';
 import { createDesktopAnalytics } from '../main/analytics.mjs';
@@ -741,6 +742,7 @@ async function runningDesktop(
     createSettingsStore: () => storage.store,
     createMacEncryption,
     serverOrigin,
+    serverToken,
     setupResource,
     desktopContentPolicy,
     createHash,
@@ -4807,6 +4809,11 @@ test('server connections encrypt their token, preserve local keys, and never rev
   ])
     await assert.rejects(f.store.saveConnection({ url, token }));
   assert.equal((await f.store.connection()).url, 'https://assistant.example.test');
+  await f.store.saveConnection({ url: 'https://assistant.example.test', token: `  ${token}\n` });
+  assert.deepEqual(await f.reopen().connection(), { url: 'https://assistant.example.test', token });
+  await assert.rejects(
+    f.store.saveConnection({ url: 'https://assistant.example.test', token: '  ' }),
+  );
   f.encryption.isEncryptionAvailable = () => false;
   await assert.rejects(f.store.saveConnection({ url: 'https://other.example.test', token }));
   await assert.rejects(f.reopen().connection());
@@ -4880,8 +4887,9 @@ test('verified server connections use the desktop ID and require both sharing ga
       const token = randomBytes(32).toString('base64url');
       const f = await runningDesktop(
         t,
-        async () =>
-          Response.json({
+        async (_resource, init) => {
+          assert.equal(new Headers(init.headers).get('authorization'), `Bearer ${token}`);
+          return Response.json({
             user: { id: 'server-owner' },
             settings: {
               onboardingCompleted: true,
@@ -4889,7 +4897,8 @@ test('verified server connections use the desktop ID and require both sharing ga
               ...(scenario.olderServer ? {} : { usageDataRevision: '1' }),
             },
             analytics: { enabled: scenario.serverAnalytics },
-          }),
+          });
+        },
         {
           initialState: 'fresh',
           packaged: true,
@@ -4908,7 +4917,8 @@ test('verified server connections use the desktop ID and require both sharing ga
           },
           { attempts: 40, interval: 10 },
         );
-        await f.checkRemoteConnection({ url, token });
+        const connection = await f.checkRemoteConnection({ url, token: `  ${token}\n` });
+        assert.equal(connection.token, token);
         assert.equal(
           f.nativeAnalytics.filter((item) => item.event === 'server_connection_verified').length,
           0,
