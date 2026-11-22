@@ -6311,6 +6311,28 @@ describe('model connections', { skip: !process.env.TEST_DATABASE_URL }, () => {
   });
 });
 
+test('API errors keep the server reason or else the status, never a response body', async (t) => {
+  const { responseError } = await import('../src/web/lib/api.ts');
+  const { downloadExport } = await import('../src/web/lib/download.ts');
+  const failure = (body: string, status: number, type: string) =>
+    responseError(new Response(body, { status, headers: { 'Content-Type': type } }));
+  const json = await failure('{"message":"Disk is full"}', 500, 'application/json');
+  assert.equal(json.message, 'Disk is full');
+  assert.equal(json.status, 500);
+  const preferred = await failure('{"error":"Too large","message":"x"}', 413, 'application/json');
+  assert.equal(preferred.message, 'Too large');
+  const proxy = await failure('<html>PRIVATE_BODY_CANARY</html>', 502, 'text/html');
+  assert.equal(proxy.message, 'The request could not be completed (HTTP 502).');
+  assert.equal(proxy.status, 502);
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ error: 'The export is too large.' }, { status: 413 }),
+  );
+  await assert.rejects(downloadExport('/api/memory/export', 'memory.md'), {
+    message: 'The export is too large.',
+    status: 413,
+  });
+});
+
 test('feedback activity keeps only bounded technical facts, expires locally and clears on owner changes', async (t) => {
   const { createFeedbackActivity, parseFeedbackActivity } =
     await import('../src/shared/feedback-activity.ts');
