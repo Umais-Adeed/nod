@@ -65,6 +65,7 @@ import {
   unreadChatMessageIds,
   type ChatReadCursor,
 } from '../lib/chat-unread';
+import { cutText } from '../../shared/cut-text';
 
 type ComposerReply = NonNullable<Message['replyTo']> & { answerQuestion?: true };
 type UnreadVisit = {
@@ -1529,7 +1530,7 @@ export function Chat({
           ...(replyId
             ? {
                 replyToMessageId: replyId,
-                ...(reply?.isQuote ? { replyQuote: reply.text.slice(0, 4000) } : {}),
+                ...(reply?.isQuote ? { replyQuote: cutText(reply.text, 4000) } : {}),
               }
             : {}),
           ...(seenMessageId ? { seenMessageId } : {}),

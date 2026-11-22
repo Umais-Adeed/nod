@@ -1,3 +1,5 @@
+import { cutText } from '../shared/cut-text.ts';
+
 export class ModelServiceError extends Error {
   constructor(
     message: string,
@@ -67,7 +69,7 @@ export async function modelServiceError(
     await reader?.cancel().catch(() => {});
     reader?.releaseLock();
   }
-  const details = redact(reason).slice(0, 2000);
+  const details = cutText(redact(reason), 2000);
   return new ModelServiceError(
     `${service} failed (HTTP ${response.status})${reason ? `: ${details}` : '.'}`,
     serviceReason ? redact(serviceReason) : undefined,
