@@ -9329,6 +9329,13 @@ test('cloud connections list only the account’s models and send each key only 
       requests.push(url);
       assert.equal(init?.redirect, 'error');
       if (url.startsWith('https://bedrock.eu-west-1.amazonaws.com/')) {
+        if (headers.get('authorization') === 'Bearer fixture-bedrock-expired')
+          return Response.json(
+            { message: 'The security token fixture-bedrock-expired is expired' },
+            { status: 403 },
+          );
+        if (headers.get('authorization') === 'Bearer fixture-bedrock-malformed')
+          return Response.json({ message: 'Malformed input request' }, { status: 400 });
         if (headers.get('authorization') !== 'Bearer fixture-bedrock-key')
           return Response.json({ message: 'Synthetic denial' }, { status: 403 });
         if (url.includes('/foundation-models?'))
@@ -9353,6 +9360,13 @@ test('cloud connections list only the account’s models and send each key only 
       }
       if (url === 'https://down.openai.azure.com/openai/v1/models')
         return Response.json({ error: { message: 'Synthetic outage' } }, { status: 503 });
+      if (url === 'https://private.openai.azure.com/openai/v1/models')
+        return Response.json(
+          { error: { code: '403', message: 'Public access is disabled.' } },
+          { status: 403 },
+        );
+      if (url === 'https://gone.openai.azure.com/openai/v1/models')
+        return Response.json({ error: { message: 'Resource not found' } }, { status: 404 });
       if (url.startsWith('https://aiplatform.googleapis.com/v1/publishers/google/models/')) {
         if (headers.get('x-goog-api-key') === 'fixture-vertex-busy')
           return Response.json(
@@ -9364,6 +9378,17 @@ test('cloud connections list only the account’s models and send each key only 
               },
             },
             { status: 429 },
+          );
+        if (headers.get('x-goog-api-key') === 'fixture-vertex-disabled')
+          return Response.json(
+            {
+              error: {
+                code: 403,
+                message: 'Vertex AI API is disabled.',
+                status: 'PERMISSION_DENIED',
+              },
+            },
+            { status: 403 },
           );
         return new Response(null, {
           status: headers.get('x-goog-api-key') === 'fixture-vertex-key' ? 200 : 400,
@@ -9391,7 +9416,21 @@ test('cloud connections list only the account’s models and send each key only 
       key: 'fixture-wrong-key',
       region: 'eu-west-1',
     }),
-    /didn’t accept this key/,
+    /Amazon Bedrock model discovery failed \(HTTP 403\).*Synthetic denial/,
+  );
+  const bedrockFailure = (key: string) =>
+    backend.catalog('amazon-bedrock', 'api_key', { type: 'bedrock', key, region: 'eu-west-1' });
+  await assert.rejects(
+    bedrockFailure('fixture-bedrock-expired'),
+    (error: Error) =>
+      /Amazon Bedrock model discovery failed \(HTTP 403\).*security token \[redacted\] is expired/.test(
+        error.message,
+      ) && !error.message.includes('fixture-bedrock-expired'),
+  );
+  await assert.rejects(bedrockFailure('fixture-bedrock-malformed'), (error: Error) =>
+    /Amazon Bedrock model discovery failed \(HTTP 400\).*Malformed input request/.test(
+      error.message,
+    ),
   );
   const sent = requests.length;
   await assert.rejects(
@@ -9409,7 +9448,14 @@ test('cloud connections list only the account’s models and send each key only 
   assert.ok(vertex.length > 1);
   await assert.rejects(
     backend.catalog('google-vertex', 'api_key', { type: 'api_key', key: 'fixture-wrong-key' }),
-    /didn’t accept this API key/,
+    /Google Vertex AI model discovery failed \(HTTP 400\)/,
+  );
+  await assert.rejects(
+    backend.catalog('google-vertex', 'api_key', {
+      type: 'api_key',
+      key: 'fixture-vertex-disabled',
+    }),
+    /Google Vertex AI model discovery failed \(HTTP 403\).*Vertex AI API is disabled/,
   );
   await assert.rejects(
     backend.catalog('google-vertex', 'api_key', { type: 'api_key', key: 'fixture-vertex-busy' }),
@@ -9429,6 +9475,20 @@ test('cloud connections list only the account’s models and send each key only 
     azure.map(({ choice }) => choice.id),
     ['gpt-6.1-sol'],
   );
+  for (const [host, pattern] of [
+    ['private', /Azure OpenAI model discovery failed \(HTTP 403\).*Public access is disabled/],
+    ['gone', /Azure OpenAI model discovery failed \(HTTP 404\).*Resource not found/],
+  ] as const)
+    await assert.rejects(
+      backend.catalog('azure', 'api_key', {
+        type: 'azure',
+        url: `https://${host}.openai.azure.com/openai/v1`,
+        key: 'fixture-azure-key',
+        model: 'gpt-6.1-sol',
+        deployment: 'fixture-deployment',
+      }),
+      (error: Error) => pattern.test(error.message) && !error.message.includes('didn’t accept'),
+    );
   await assert.rejects(
     backend.catalog('azure', 'api_key', {
       type: 'azure',
