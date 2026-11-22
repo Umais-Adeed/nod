@@ -74,6 +74,8 @@ function supportedModel(model: Model<Api>): Model<Api> {
     return { ...model, compat: { ...model.compat, supportsStrictMode: false } };
   if (model.provider === 'openrouter' && model.id === 'openrouter/free')
     return { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, off: null } };
+  if (model.provider === 'compatible' && model.thinkingLevelMap?.high === 'true')
+    return { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, high: 'high' } };
   return model;
 }
 
@@ -169,7 +171,7 @@ function ollamaModel(show: z.infer<typeof ollamaShowSchema>) {
           ? {
               off: values.includes(false) ? 'none' : null,
               ...Object.fromEntries(
-                levels.map((level) => [level, level === 'high' ? 'true' : null]),
+                levels.map((level) => [level, level === 'high' ? level : null]),
               ),
             }
           : undefined;
@@ -1322,10 +1324,6 @@ export async function createPiModelRuntime(
         completeRequest = await access.prepareRequest?.(target.id, automatic || cacheWarm);
         const changed = await options?.onPayload?.(payload, target);
         const body = (changed ?? payload) as Record<string, unknown>;
-        if (access.provider === 'compatible' && target.thinkingLevelMap?.high === 'true') {
-          body.think = body.reasoning_effort !== 'none' || target.thinkingLevelMap.off === null;
-          delete body.reasoning_effort;
-        }
         if (access.provider === 'openrouter')
           body.provider = { require_parameters: true, allow_fallbacks: false };
         if (
