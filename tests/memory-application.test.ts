@@ -301,7 +301,7 @@ test(
           ],
           ['GET', '/api/messages/search?q=%00', undefined],
           ['GET', '/api/messages/around/%00', undefined],
-          ['PATCH', '/api/preferences', { ['Synthetic\u0000key']: 'Synthetic' }],
+          ['PATCH', '/api/preferences', { 'Synthetic\u0000key': 'Synthetic' }],
           [
             'POST',
             '/api/messages',
