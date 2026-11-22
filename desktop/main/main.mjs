@@ -670,11 +670,24 @@ function synchronizeNotifications() {
   }
 }
 
+async function renderNotificationText(text) {
+  const response = await engineRequest('/api/notification-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error('The notification preview is unavailable.');
+  const body = await response.json();
+  if (typeof body?.text !== 'string') throw new Error('The notification preview is unavailable.');
+  return body.text;
+}
+
 async function notifyAssistantMessage(message, threadId) {
   if (!preferences.notifications || !Notification.isSupported() || quitting) return;
   if ([...engineWindows].some((window) => !window.isDestroyed() && window.isFocused())) return;
   const sourceEngine = remoteConnection || engine;
   const saved = await appPreferences.get();
+  const body = await assistantNotificationPreview(message, knownSecrets, renderNotificationText);
   if (
     !sourceEngine ||
     (remoteConnection || engine) !== sourceEngine ||
@@ -687,7 +700,7 @@ async function notifyAssistantMessage(message, threadId) {
   const notification = new Notification({
     title: 'Nod',
     icon: notificationIcon,
-    body: assistantNotificationPreview(message, knownSecrets),
+    body,
   });
   displayedNotifications.add(notification);
   notification.on('show', () => {

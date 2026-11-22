@@ -144,3 +144,42 @@ export function messagePreview(text: string): string {
     fallback = previewSlice(fallback, Math.floor(fallback.length / 2));
   }
 }
+
+const spans = new Set(['emphasis', 'strong', 'delete', 'link', 'linkReference']);
+const phrasingParents = new Set(['paragraph', 'heading', 'tableCell', ...spans]);
+
+function plainText(node: Nodes, inline: boolean): string {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+      return node.value;
+    case 'image':
+    case 'imageReference':
+      return node.alt ?? '';
+    case 'break':
+    case 'thematicBreak':
+      return ' ';
+    case 'html': {
+      const text = htmlText(parseFragment(node.value));
+      return inline ? text : ` ${text} `;
+    }
+    case 'code':
+    case 'definition':
+    case 'footnoteDefinition':
+    case 'footnoteReference':
+      return ' ';
+  }
+  if (!('children' in node)) return '';
+  const text = (node.children as Nodes[])
+    .map((child) => plainText(child, phrasingParents.has(node.type)))
+    .join('');
+  if (node.type === 'link' && URL.canParse(text)) {
+    const url = new URL(text);
+    if (/^https?:$/.test(url.protocol)) return url.hostname;
+  }
+  return spans.has(node.type) ? text : ` ${text} `;
+}
+
+export function notificationPreview(text: string): string {
+  return plainText(markdown.parse(text), false).replace(/\s+/g, ' ').trim();
+}

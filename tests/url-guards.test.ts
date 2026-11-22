@@ -25,6 +25,7 @@ import { previewableUrl, publicMediaUrl } from '../src/shared/link-preview.ts';
 import { MessageQuote, MessageText } from '../src/web/components/message.tsx';
 import { connectionUrl } from '../src/web/lib/connection-url.ts';
 import { messageSetupLinks } from '../src/web/lib/message-links.ts';
+import { notificationPreview } from '../src/server/message-preview.ts';
 import { ownerAddress, publicHttps } from '../src/providers/discovered/remote.ts';
 import { paymentExplanation, paymentInvitation } from '../src/runtime/communication.ts';
 import {
@@ -487,6 +488,21 @@ test('reply excerpts cannot load media or expose nested actions', () => {
   );
   assert.match(selected, /&lt;button data-x=&quot;1&quot;&gt; \*literal\*/);
   assert.equal((selected.match(/<button\b/g) ?? []).length, 1);
+});
+
+test('notification previews read the same Markdown parse as chat and keep only its text', () => {
+  for (const [input, expected] of [
+    ['Use &lt;b&gt; for bold text', 'Use <b> for bold text'],
+    ['Open [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now', 'Open Foo now'],
+    ['Check a < b and my_var_name', 'Check a < b and my_var_name'],
+    ['Open https://example.test/private?token=synthetic-link-secret now', 'Open example.test now'],
+    [
+      '## **Your report is ready**\n\nRead [the summary](https://example.test/x), ![chart](https://example.test/c.png) and `review.csv`.\n\n```\nhidden code\n```\n\n<!--hidden comment--><script>hidden script</script>',
+      'Your report is ready Read the summary, chart and review.csv.',
+    ],
+    ['- one\n- two\n\n| a | b |\n| - | - |\n| c | d |', 'one two a b c d'],
+  ])
+    assert.equal(notificationPreview(input), expected);
 });
 
 test('the browser proxy refuses private network destinations, including names that resolve to them', async () => {

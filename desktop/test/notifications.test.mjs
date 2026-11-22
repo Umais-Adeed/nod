@@ -46,35 +46,46 @@ test('readiness notices require an observed preparation and durable opt-in, then
   assert.equal(notices, 1);
 });
 
-test('notification previews extract readable message text without link targets or hidden markup', () => {
-  const preview = assistantNotificationPreview({
-    text: '## **Your report is ready**\n\nRead [the summary](https://example.test/private?token=synthetic-link-secret) and `review.csv`.\n<!--hidden comment--><script>hidden script</script>',
-    replyTo: { text: 'synthetic-private-quoted-message' },
-  });
-  assert.ok(preview.includes('Your report is ready'));
-  assert.ok(preview.includes('the summary'));
-  for (const value of [
-    'synthetic-link-secret',
-    'hidden comment',
-    'hidden script',
-    'synthetic-private-quoted-message',
-  ])
-    assert.ok(!preview.includes(value));
-  const attachment = assistantNotificationPreview({
-    text: '',
-    attachments: [
-      { name: 'quarterly-report.csv', url: '/api/artifacts/synthetic-capability-token' },
-    ],
-  });
-  assert.ok(attachment.includes('quarterly-report.csv'));
-  assert.ok(!attachment.includes('synthetic-capability-token'));
+test('notification previews use the engine text, never the quoted reply or attachment target, and fall back when it is unavailable', async () => {
+  const render = async (text) => `${text} \u202egnp.exe`;
+  const preview = await assistantNotificationPreview(
+    { text: 'Your report is ready', replyTo: { text: 'synthetic-private-quoted-message' } },
+    [],
+    render,
+  );
+  assert.equal(preview, 'Your report is ready gnp.exe');
+  const attachment = await assistantNotificationPreview(
+    {
+      text: '',
+      attachments: [
+        { name: 'quarterly-report.csv', url: '/api/artifacts/synthetic-capability-token' },
+      ],
+    },
+    [],
+    render,
+  );
+  assert.equal(attachment, 'Shared quarterly-report.csv');
+  const unavailable = async () => {
+    throw new Error('The notification preview is unavailable.');
+  };
+  assert.equal(
+    await assistantNotificationPreview(
+      { text: '[private](https://example.test/x)' },
+      [],
+      unavailable,
+    ),
+    'You have a new message from Nod.',
+  );
 });
 
-test('notification previews redact configured credentials after decoding formatting', () => {
+test('notification previews redact configured credentials from the rendered text', async () => {
   const known = 'synthetic-notification-secret/123456=';
-  const encoded = [...known].map((character) => `&#${character.codePointAt(0)};`).join('');
-  for (const input of [known, encodeURIComponent(known), encoded]) {
-    const preview = assistantNotificationPreview({ text: `Result: ${input}` }, new Set([known]));
+  for (const input of [known, encodeURIComponent(known)]) {
+    const preview = await assistantNotificationPreview(
+      { text: `Result: ${input}` },
+      new Set([known]),
+      async (text) => text,
+    );
     assert.ok(!preview.includes(known));
     assert.ok(!preview.includes(encodeURIComponent(known)));
     assert.ok(preview.includes('[redacted]'));
