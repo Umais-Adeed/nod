@@ -292,11 +292,23 @@ export function createSchedules(dependencies: ScheduleDependencies) {
   function nextOccurrence(schedule: ScheduleRow, after = now(), queuedFor?: Date) {
     if (!schedule.enabled) return null;
     if (schedule.kind === 'once') return schedule.runAt;
-    const cron = resolveScheduleCron(schedule.cron!, schedule.id);
+    return nextCronOccurrence(
+      { id: schedule.id, cron: schedule.cron!, timeZone: schedule.timeZone },
+      after,
+      queuedFor,
+    );
+  }
+
+  function nextCronOccurrence(
+    schedule: { id: string; cron: string; timeZone: string },
+    after: Date,
+    queuedFor?: Date,
+  ) {
+    const cron = resolveScheduleCron(schedule.cron, schedule.id);
     const next = (from: Date) =>
       scheduler.previewSchedule(cron, { tz: schedule.timeZone, count: 1, from })[0]!;
     const occurrence = next(after);
-    if (queuedFor && hashedCron.test(schedule.cron!) && readSchedule(cron).frequency === 'daily') {
+    if (queuedFor && hashedCron.test(schedule.cron) && readSchedule(cron).frequency === 'daily') {
       const date = new Intl.DateTimeFormat('en-CA', { timeZone: schedule.timeZone });
       if (date.format(occurrence) === date.format(queuedFor)) return next(occurrence);
     }
@@ -314,11 +326,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
       )
     ).rows[0];
     if (!row) return;
-    const next = previewSchedule(row.cron, row.id, {
-      tz: row.timeZone,
-      count: 1,
-      from: row.scheduledFor,
-    })[0];
+    const next = nextCronOccurrence(row, row.scheduledFor, row.scheduledFor);
     const gap = next ? next.getTime() - row.scheduledFor.getTime() : Number.NaN;
     if (!Number.isFinite(gap) || gap <= 0 || gap > 55 * 60_000) return;
     return gap > 5 * 60_000 ? 'long' : 'short';

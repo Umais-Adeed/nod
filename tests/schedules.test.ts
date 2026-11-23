@@ -326,8 +326,10 @@ test(
         assert.equal((await jobFor(id)).id, job.id);
         clock = new Date(legacyDue);
         await deliver([job]);
-        assert.equal((await runs(id))[0]?.scheduledFor, legacyDue);
+        const [run] = await runs(id);
+        assert.equal(run?.scheduledFor, legacyDue);
         assert.equal((await saved(id)).nextRun, '2035-10-27T09:23:00.000Z');
+        assert.equal(await personal.scheduleCache(run.turnId), undefined);
         await request('DELETE', `/api/schedules/${id}`);
       });
 
