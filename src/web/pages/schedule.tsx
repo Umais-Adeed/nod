@@ -49,13 +49,13 @@ export function ScheduleRow({
   const dateFormat = useDateFormat();
   const [showRuns, setShowRuns] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [runError, setRunError] = useState('');
   const [resultTurnId, setResultTurnId] = useState<string>();
   const pendingRun = useSyncExternalStore(subscribeRuns, () =>
     requestAccountVersion() === runAccountVersion ? pendingRuns.get(schedule.id) : undefined,
   );
+  const starting = pendingRun?.working === true;
   const stoppedTurnId = useRef<string | null>(null);
   const working = useRef(false);
   const change = useDirectChange(schedule.id);
@@ -82,14 +82,13 @@ export function ScheduleRow({
   );
   const activeStatus = live ? 'running' : activeRun?.status;
   const questionMessageId = activeStatus === 'waiting' ? activeRun?.questionMessageId : null;
-  const runLabel =
-    starting || pendingRun?.working
-      ? 'Starting…'
-      : activeStatus
-        ? statusLabels[activeStatus]
-        : pendingRun
-          ? 'Try again'
-          : 'Run now';
+  const runLabel = starting
+    ? 'Starting…'
+    : activeStatus
+      ? statusLabels[activeStatus]
+      : pendingRun
+        ? 'Try again'
+        : 'Run now';
   async function runNow() {
     const accountVersion = requestAccountVersion();
     if (accountVersion !== runAccountVersion) {
@@ -99,7 +98,6 @@ export function ScheduleRow({
     const previous = pendingRuns.get(schedule.id);
     if (working.current || previous?.working || activeStatus) return;
     working.current = true;
-    setStarting(true);
     setRunError('');
     setShowRuns(true);
     setDetailsOpen(true);
@@ -143,7 +141,6 @@ export function ScheduleRow({
       );
     } finally {
       working.current = false;
-      setStarting(false);
       if (accountVersion === requestAccountVersion()) {
         if (pendingRuns.get(schedule.id) === input)
           pendingRuns.set(schedule.id, { ...input, working: false });
@@ -246,7 +243,6 @@ export function ScheduleRow({
               size="sm"
               disabled={
                 starting ||
-                Boolean(pendingRun?.working) ||
                 Boolean(activeStatus && !questionMessageId) ||
                 change.busy ||
                 change.uncertain

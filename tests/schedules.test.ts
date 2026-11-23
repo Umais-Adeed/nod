@@ -2774,6 +2774,7 @@ test('scheduled run retry survives remount and permits a fresh run', async (t) =
     `button[aria-label="Starting… for ${schedule.title}"]`,
   );
   assert.ok(starting?.disabled);
+  assert.equal(starting.getAttribute('aria-busy'), 'true');
   await act(async () => {
     loseResponse();
     await responseLost;
