@@ -2665,6 +2665,152 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
   assert.deepEqual(mutations, ['PATCH', 'DELETE', 'PATCH', 'DELETE', 'DELETE', 'PATCH', 'DELETE']);
 });
 
+test('scheduled run retry survives remount and permits a fresh run', async (t) => {
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: 'https://nod.example.test/tasks',
+    pretendToBeVisual: true,
+  });
+  const globals = {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    HTMLElement: dom.window.HTMLElement,
+    Element: dom.window.Element,
+    Node: dom.window.Node,
+    Event: dom.window.Event,
+    CustomEvent: dom.window.CustomEvent,
+    MutationObserver: dom.window.MutationObserver,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const originals = new Map(
+    Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
+  );
+  for (const [key, value] of Object.entries(globals))
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  const { act, createElement } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { pageDataCache } = await import('../src/web/lib/page-data-cache.ts');
+  const { setRequestAccount } = await import('../src/web/lib/api.ts');
+  const { Scheduled } = await import('../src/web/pages/tasks.tsx');
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  t.after(async () => {
+    await act(async () => root.unmount());
+    pageDataCache.clear();
+    setRequestAccount(null);
+    dom.window.close();
+    for (const [key, value] of originals)
+      if (value) Object.defineProperty(globalThis, key, value);
+      else Reflect.deleteProperty(globalThis, key);
+  });
+  pageDataCache.clear();
+  let schedule: Schedule = {
+    id: randomUUID(),
+    title: 'Retry schedule',
+    prompt: 'Read the report at https://reports.example.test and summarize it in Nod.',
+    kind: 'recurring',
+    cron: '0 9 * * *',
+    runAt: null,
+    timeZone: 'UTC',
+    enabled: true,
+    revision: 1,
+    nextRun: '2035-10-27T09:00:00.000Z',
+    lastRun: null,
+    activeRun: null,
+    baselineObservation: null,
+    watch: null,
+    monthlyUsd: null,
+    model: null,
+  };
+  const requests: Array<{ requestId: string; expectedRevision: number }> = [];
+  let loseResponse!: () => void;
+  let finishOld!: () => void;
+  let finishCurrent!: () => void;
+  const oldResponse = new Promise<void>((resolve) => {
+    finishOld = resolve;
+  });
+  const currentResponse = new Promise<void>((resolve) => {
+    finishCurrent = resolve;
+  });
+  const responseLost = new Promise<void>((resolve) => {
+    loseResponse = resolve;
+  });
+  t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, options?: RequestInit) => {
+    const path = String(input);
+    if (options?.method === 'POST') {
+      requests.push(JSON.parse(String(options.body)));
+      if (requests.length === 1) {
+        await responseLost;
+        throw new TypeError('Response lost');
+      }
+      if (requests.length === 4) await oldResponse;
+      if (requests.length === 5) {
+        await currentResponse;
+        throw new TypeError('Response lost');
+      }
+      return Response.json({ turnId: randomUUID(), activeRun: null });
+    }
+    if (path === '/api/schedules') return Response.json([schedule]);
+    if (path === '/api/tasks') return Response.json([]);
+    return Response.json({ runs: [], nextCursor: null });
+  });
+  const render = () => root.render(createElement(Scheduled, { onAsk: () => {} }));
+  const clickRun = async (label: string) => {
+    const button = dom.window.document.querySelector<HTMLButtonElement>(
+      `button[aria-label="${label} for ${schedule.title}"]`,
+    );
+    assert.ok(button, label);
+    await act(async () => button.click());
+  };
+  await act(async () => render());
+  const first = dom.window.document.querySelector<HTMLButtonElement>(
+    `button[aria-label="Run now for ${schedule.title}"]`,
+  )!;
+  await act(async () => first.click());
+  await act(async () => root.render(null));
+  await act(async () => render());
+  const starting = dom.window.document.querySelector<HTMLButtonElement>(
+    `button[aria-label="Starting… for ${schedule.title}"]`,
+  );
+  assert.ok(starting?.disabled);
+  await act(async () => {
+    loseResponse();
+    await responseLost;
+  });
+  await act(async () => root.render(null));
+  schedule = { ...schedule, revision: 2 };
+  await act(async () => {
+    await pageDataCache.refresh('/api/schedules', true);
+    render();
+  });
+  await clickRun('Try again');
+  assert.deepEqual(requests[1], requests[0]);
+  await clickRun('Run now');
+  assert.notEqual(requests[2].requestId, requests[0].requestId);
+  assert.equal(requests[2].expectedRevision, 2);
+  await clickRun('Run now');
+  await act(async () => root.render(null));
+  setRequestAccount('another-synthetic-account');
+  await act(async () => render());
+  await clickRun('Run now');
+  assert.notEqual(requests[4].requestId, requests[3].requestId);
+  await act(async () => {
+    finishOld();
+    await oldResponse;
+  });
+  const currentRun = dom.window.document.querySelector<HTMLButtonElement>(
+    `button[aria-label="Starting… for ${schedule.title}"]`,
+  );
+  assert.ok(currentRun?.disabled);
+  await act(async () => {
+    finishCurrent();
+    await currentResponse;
+  });
+  await clickRun('Try again');
+  assert.deepEqual(requests[5], requests[4]);
+});
+
 test('waiting scheduled runs open their pending question without starting another run (LAB-1215)', async (t) => {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {

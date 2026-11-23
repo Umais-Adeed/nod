@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { CalendarClock, LoaderCircle, Play, Sparkles, Square } from '../components/icons';
 import type { Activity, Schedule, ScheduleHistory, ScheduleRun } from '../../shared/contracts';
 import { StatusIcon, statusLabels } from '../components/turn-status';
@@ -21,6 +21,22 @@ import { Button, Loading, Notice } from '../components/ui';
 import { money } from '../lib/money';
 import { useOwnModel, WorkModel } from '../components/model-choices';
 
+type PendingRun = { requestId: string; expectedRevision: number; working: boolean };
+const pendingRuns = new Map<string, PendingRun>();
+const runListeners = new Set<() => void>();
+let runAccountVersion = requestAccountVersion();
+
+function notifyRuns() {
+  for (const listener of runListeners) listener();
+}
+
+function subscribeRuns(listener: () => void) {
+  runListeners.add(listener);
+  return () => {
+    runListeners.delete(listener);
+  };
+}
+
 export function ScheduleRow({
   schedule,
   activity,
@@ -37,7 +53,9 @@ export function ScheduleRow({
   const [stopping, setStopping] = useState(false);
   const [runError, setRunError] = useState('');
   const [resultTurnId, setResultTurnId] = useState<string>();
-  const pendingRun = useRef<{ requestId: string; expectedRevision: number } | null>(null);
+  const pendingRun = useSyncExternalStore(subscribeRuns, () =>
+    requestAccountVersion() === runAccountVersion ? pendingRuns.get(schedule.id) : undefined,
+  );
   const stoppedTurnId = useRef<string | null>(null);
   const working = useRef(false);
   const change = useDirectChange(schedule.id);
@@ -64,33 +82,48 @@ export function ScheduleRow({
   );
   const activeStatus = live ? 'running' : activeRun?.status;
   const questionMessageId = activeStatus === 'waiting' ? activeRun?.questionMessageId : null;
-  const runLabel = starting
-    ? 'Starting…'
-    : activeStatus
-      ? statusLabels[activeStatus]
-      : pendingRun.current
-        ? 'Try again'
-        : 'Run now';
+  const runLabel =
+    starting || pendingRun?.working
+      ? 'Starting…'
+      : activeStatus
+        ? statusLabels[activeStatus]
+        : pendingRun
+          ? 'Try again'
+          : 'Run now';
   async function runNow() {
-    if (working.current || activeStatus) return;
+    const accountVersion = requestAccountVersion();
+    if (accountVersion !== runAccountVersion) {
+      pendingRuns.clear();
+      runAccountVersion = accountVersion;
+    }
+    const previous = pendingRuns.get(schedule.id);
+    if (working.current || previous?.working || activeStatus) return;
     working.current = true;
     setStarting(true);
     setRunError('');
     setShowRuns(true);
     setDetailsOpen(true);
-    const accountVersion = requestAccountVersion();
-    const input = pendingRun.current ?? {
-      requestId: crypto.randomUUID(),
-      expectedRevision: schedule.revision,
+    const input = {
+      requestId: previous?.requestId ?? crypto.randomUUID(),
+      expectedRevision: previous?.expectedRevision ?? schedule.revision,
+      working: true,
     };
-    pendingRun.current = input;
+    pendingRuns.set(schedule.id, input);
+    notifyRuns();
     try {
       const run = await api<{ turnId: string; activeRun: Schedule['activeRun'] }>(
         `${schedulesPath}/${encodeURIComponent(schedule.id)}/run`,
-        { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(45_000) },
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            requestId: input.requestId,
+            expectedRevision: input.expectedRevision,
+          }),
+          signal: AbortSignal.timeout(45_000),
+        },
       );
       if (accountVersion !== requestAccountVersion()) return;
-      pendingRun.current = null;
+      pendingRuns.delete(schedule.id);
       setResultTurnId(run.turnId);
       pageDataCache.update<Schedule[]>(
         schedulesPath,
@@ -102,7 +135,7 @@ export function ScheduleRow({
     } catch (cause) {
       if (accountVersion !== requestAccountVersion()) return;
       const uncertain = uncertainScheduleMutation(cause);
-      if (!uncertain) pendingRun.current = null;
+      if (!uncertain) pendingRuns.delete(schedule.id);
       setRunError(
         uncertain
           ? `Could not confirm that the run started. ${errorMessage(cause)} Select Try again to check or start the same run.`
@@ -112,6 +145,9 @@ export function ScheduleRow({
       working.current = false;
       setStarting(false);
       if (accountVersion === requestAccountVersion()) {
+        if (pendingRuns.get(schedule.id) === input)
+          pendingRuns.set(schedule.id, { ...input, working: false });
+        notifyRuns();
         pageDataCache.revalidateActive('/api/schedule-runs');
         void pageDataCache.refresh(schedulesPath, true);
       }
@@ -210,6 +246,7 @@ export function ScheduleRow({
               size="sm"
               disabled={
                 starting ||
+                Boolean(pendingRun?.working) ||
                 Boolean(activeStatus && !questionMessageId) ||
                 change.busy ||
                 change.uncertain

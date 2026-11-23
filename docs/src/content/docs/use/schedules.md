@@ -47,7 +47,7 @@ Select **Stop this run** to stop only that run, including work waiting for your 
 
 Select **Needs your input** to open the run's current question in Chat, where you can approve an action or complete sign-in. This opens the existing request without starting another run.
 
-**Run now** runs a watch even when its connected accounts have no changes. If the connection drops, **Try again** checks or starts the same run. It cannot start a second copy.
+**Run now** runs a watch even when its connected accounts have no changes. If the connection drops, **Try again** checks or starts the same run, even if you leave and reopen Scheduled. It cannot start a second copy. Once the result is confirmed, **Run now** starts a new run.
 
 ## What happens when a schedule runs
 
