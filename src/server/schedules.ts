@@ -230,18 +230,14 @@ function runValue(row: RunRow): ScheduleRun {
   };
 }
 
-export function resolveScheduleCron(cron: string, id: string) {
-  const hashed = /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(cron);
-  if (!hashed) {
-    CronExpressionParser.parse(cron);
-    return cron;
-  }
+const hashedCron = /(?:^|[\s,])H(?=$|[\s,(\/#])/i;
+const validationHashSeed = 'validation';
+const fallbackHashSeeds = Array.from({ length: 128 }, (_, index) => `calendar-fallback-${index}`);
+
+function resolveScheduleCron(cron: string, id: string) {
+  if (!hashedCron.test(cron)) return cron;
   let firstError: unknown;
-  for (const seed of [
-    id,
-    'validation',
-    ...Array.from({ length: 128 }, (_, i) => `calendar-fallback-${i}`),
-  ]) {
+  for (const seed of [id, validationHashSeed, ...fallbackHashSeeds]) {
     try {
       return CronExpressionParser.parse(cron, { hashSeed: seed }).stringify();
     } catch (error) {
@@ -286,21 +282,25 @@ export function createSchedules(dependencies: ScheduleDependencies) {
       if (!input.cron || input.runAt || input.cron.split(/\s+/).length !== 5)
         throw invalid('Use a five-field cron schedule for recurring work.');
       try {
-        previewSchedule(input.cron, 'validation', { tz: input.timeZone, count: 1 });
+        previewSchedule(input.cron, validationHashSeed, { tz: input.timeZone, count: 1 });
       } catch {
         throw invalid('Check the schedule and time zone.');
       }
     }
   }
 
-  function nextOccurrence(schedule: ScheduleRow, after = now()) {
+  function nextOccurrence(schedule: ScheduleRow, after = now(), queuedFor?: Date) {
     if (!schedule.enabled) return null;
     if (schedule.kind === 'once') return schedule.runAt;
-    return previewSchedule(schedule.cron!, schedule.id, {
-      tz: schedule.timeZone,
-      count: 1,
-      from: after,
-    })[0]!;
+    const cron = resolveScheduleCron(schedule.cron!, schedule.id);
+    const next = (from: Date) =>
+      scheduler.previewSchedule(cron, { tz: schedule.timeZone, count: 1, from })[0]!;
+    const occurrence = next(after);
+    if (queuedFor && hashedCron.test(schedule.cron!) && readSchedule(cron).frequency === 'daily') {
+      const date = new Intl.DateTimeFormat('en-CA', { timeZone: schedule.timeZone });
+      if (date.format(occurrence) === date.format(queuedFor)) return next(occurrence);
+    }
+    return occurrence;
   }
 
   async function scheduleCache(turnId: string): Promise<'short' | 'long' | undefined> {
@@ -328,7 +328,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
     const fires: Date[] = [];
     if (schedule.kind === 'recurring' && started.getTime() - due.getTime() > lateAfterMs)
       for (
-        let next = nextOccurrence(schedule, due)!;
+        let next = nextOccurrence(schedule, due, due)!;
         next <= started && fires.length < skippedCountLimit;
         next = nextOccurrence(schedule, next)!
       )
@@ -565,18 +565,12 @@ export function createSchedules(dependencies: ScheduleDependencies) {
         ]);
         await enqueue(client, { ...row, enabled: false }, null);
       } else {
-        let next = nextOccurrence(
+        const due = row.nextRun!;
+        await enqueue(
+          client,
           row,
-          new Date(Math.max(now().getTime(), row.nextRun!.getTime())),
-        )!;
-        if (
-          /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(row.cron!) &&
-          readSchedule(resolveScheduleCron(row.cron!, row.id)).frequency === 'daily'
-        ) {
-          const date = new Intl.DateTimeFormat('en-CA', { timeZone: row.timeZone });
-          if (date.format(next) === date.format(row.nextRun!)) next = nextOccurrence(row, next)!;
-        }
-        await enqueue(client, row, next);
+          nextOccurrence(row, new Date(Math.max(now().getTime(), due.getTime())), due),
+        );
       }
       if (busy) return true;
       if (row.kind === 'recurring' && dependencies.modelPaused?.(row.model)) {

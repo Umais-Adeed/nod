@@ -261,23 +261,25 @@ test(
         UNIQUE(schedule_id,schedule_revision,scheduled_for)`);
       await personal.initialize({ workers: false });
 
-      await t.test(
-        'hashed calendar dates resolve deterministically for valid and invalid seeds',
-        async () => {
-          const { resolveScheduleCron } = await import('../src/server/schedules.ts');
-          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', 'b'), '0 9 28 2 *');
-          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', '9'), '0 9 29 2 *');
-          const resolved = resolveScheduleCron('0 9 H(28-31) 2 *', 'a');
-          assert.match(resolved, /^0 9 (28|29) 2 \*$/);
-          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', 'a'), resolved);
-          for (const day of [30, 31])
-            assert.throws(() => resolveScheduleCron(`0 9 ${day} 2 *`, 'a'));
-          const schedule = await create({ cron: '0 9 H(28-31) 2 *', timeZone: 'UTC' });
-          const preview = await request('POST', `/api/schedules/${schedule.id}/preview`, {});
-          assert.equal(preview.json().nextRun, schedule.nextRun);
-          await request('DELETE', `/api/schedules/${schedule.id}`);
-        },
-      );
+      await t.test('a saved hashed date with an invalid seed gets a valid timing', async () => {
+        const id = '00000000-0000-4000-8000-000000000003';
+        await db.pool.query(
+          `INSERT INTO schedules(id,owner_id,title,prompt,time_zone,cron)
+           VALUES($1,$2,'Fixture schedule','Return a synthetic result only.','UTC','0 9 H(28-31) 2 *')`,
+          [id, ownerId],
+        );
+        await personal.initialize({ workers: false });
+        const schedule = await saved(id);
+        const preview = await request('POST', `/api/schedules/${id}/preview`, {});
+        assert.equal(preview.statusCode, 200, preview.body);
+        assert.equal(preview.json().nextRun, '2036-02-29T09:00:00.000Z');
+        assert.equal(schedule.nextRun, preview.json().nextRun);
+        const invalid = await request('POST', `/api/schedules/${id}/preview`, {
+          cron: '0 9 H(30-31) 2 *',
+        });
+        assert.equal(invalid.statusCode, 400, invalid.body);
+        await request('DELETE', `/api/schedules/${id}`);
+      });
 
       await t.test(
         'hashed schedules keep the same daily time across previews and dispatch',
@@ -310,21 +312,23 @@ test(
           clock = previousClock;
         });
         clock = new Date('2035-10-26T00:00:00.000Z');
-        const schedule = await create({ cron: 'H 9 * * *', timeZone: 'UTC' });
-        const job = await jobFor(schedule.id);
-        const legacyDue = '2035-10-26T08:00:00.000Z';
-        await db.pool.query('UPDATE schedules SET next_run_at=$2 WHERE id=$1', [
-          schedule.id,
-          legacyDue,
-        ]);
-        job.data.scheduledFor = legacyDue;
+        const id = '00000000-0000-4000-8000-000000000001';
+        const legacyDue = '2035-10-26T09:00:00.000Z';
+        await db.pool.query(
+          `INSERT INTO schedules(id,owner_id,title,prompt,time_zone,cron,next_run_at)
+           VALUES($1,$2,'Fixture schedule','Return a synthetic result only.','UTC','H 9 * * *',$3)`,
+          [id, ownerId, legacyDue],
+        );
         await personal.initialize({ workers: false });
-        assert.equal((await saved(schedule.id)).nextRun, legacyDue);
+        const job = await jobFor(id);
+        await personal.initialize({ workers: false });
+        assert.equal((await saved(id)).nextRun, legacyDue);
+        assert.equal((await jobFor(id)).id, job.id);
         clock = new Date(legacyDue);
         await deliver([job]);
-        assert.equal((await runs(schedule.id))[0]?.scheduledFor, legacyDue);
-        assert.equal((await saved(schedule.id)).nextRun!.slice(0, 10), '2035-10-27');
-        await request('DELETE', `/api/schedules/${schedule.id}`);
+        assert.equal((await runs(id))[0]?.scheduledFor, legacyDue);
+        assert.equal((await saved(id)).nextRun, '2035-10-27T09:23:00.000Z');
+        await request('DELETE', `/api/schedules/${id}`);
       });
 
       await t.test('hashed ranges and steps retain named weekdays and time zones', async (t) => {
