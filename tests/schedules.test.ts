@@ -331,6 +331,17 @@ test(
         await request('DELETE', `/api/schedules/${schedule.id}`);
       });
 
+      await t.test('hashed nth weekday stays consistent across previews', async (t) => {
+        let random = 0.1;
+        t.mock.method(Math, 'random', () => random);
+        const schedule = await create({ cron: '0 9 * * H#2', timeZone: 'UTC' });
+        random = 0.9;
+        const preview = await request('POST', `/api/schedules/${schedule.id}/preview`, {});
+        assert.equal(preview.statusCode, 200, preview.body);
+        assert.equal(preview.json().nextRun, schedule.nextRun);
+        await request('DELETE', `/api/schedules/${schedule.id}`);
+      });
+
       await t.test('a new schedule prices recent chat requests at the selected tier', async () => {
         const { createLedger } = await import('../src/server/ledger.ts');
         const threshold = 272_000;

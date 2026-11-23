@@ -239,7 +239,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
     id: string,
     options: { tz: string; count: number; from?: Date },
   ) {
-    const resolved = /(?:^|[\s,])H(?=$|[\s,(\/])/i.test(cron)
+    const resolved = /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(cron)
       ? CronExpressionParser.parse(cron, { hashSeed: id }).stringify()
       : cron;
     return scheduler.previewSchedule(resolved, options);
