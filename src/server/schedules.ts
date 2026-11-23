@@ -28,6 +28,7 @@ import type { WorkConsumers } from './work-admission.ts';
 import { snapshotAnalytics, type CaptureAnalytics } from './analytics.ts';
 import { logFailure } from './failure-log.ts';
 import { ianaTimeZone } from './preferences.ts';
+import { readSchedule } from '../shared/schedule-timing.ts';
 import { lockKey } from './locks.ts';
 import {
   mergeOwnerInstructions,
@@ -229,6 +230,29 @@ function runValue(row: RunRow): ScheduleRun {
   };
 }
 
+export function resolveScheduleCron(cron: string, id: string) {
+  const hashed = /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(cron);
+  if (!hashed) {
+    CronExpressionParser.parse(cron);
+    return cron;
+  }
+  let firstError: unknown;
+  for (const seed of [
+    id,
+    'validation',
+    ...Array.from({ length: 128 }, (_, i) => `calendar-fallback-${i}`),
+  ]) {
+    try {
+      return CronExpressionParser.parse(cron, { hashSeed: seed }).stringify();
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'Invalid explicit day of month definition')
+        throw error;
+      firstError ??= error;
+    }
+  }
+  throw firstError;
+}
+
 export function createSchedules(dependencies: ScheduleDependencies) {
   const { pool, ownerId, scheduler, enqueueTurn, refresh } = dependencies;
   const now = dependencies.now ?? (() => new Date());
@@ -239,9 +263,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
     id: string,
     options: { tz: string; count: number; from?: Date },
   ) {
-    const resolved = /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(cron)
-      ? CronExpressionParser.parse(cron, { hashSeed: id }).stringify()
-      : cron;
+    const resolved = resolveScheduleCron(cron, id);
     return scheduler.previewSchedule(resolved, options);
   }
 
@@ -543,11 +565,18 @@ export function createSchedules(dependencies: ScheduleDependencies) {
         ]);
         await enqueue(client, { ...row, enabled: false }, null);
       } else {
-        await enqueue(
-          client,
+        let next = nextOccurrence(
           row,
-          nextOccurrence(row, new Date(Math.max(now().getTime(), row.nextRun!.getTime()))),
-        );
+          new Date(Math.max(now().getTime(), row.nextRun!.getTime())),
+        )!;
+        if (
+          /(?:^|[\s,])H(?=$|[\s,(\/#])/i.test(row.cron!) &&
+          readSchedule(resolveScheduleCron(row.cron!, row.id)).frequency === 'daily'
+        ) {
+          const date = new Intl.DateTimeFormat('en-CA', { timeZone: row.timeZone });
+          if (date.format(next) === date.format(row.nextRun!)) next = nextOccurrence(row, next)!;
+        }
+        await enqueue(client, row, next);
       }
       if (busy) return true;
       if (row.kind === 'recurring' && dependencies.modelPaused?.(row.model)) {

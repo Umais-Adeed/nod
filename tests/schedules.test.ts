@@ -262,6 +262,24 @@ test(
       await personal.initialize({ workers: false });
 
       await t.test(
+        'hashed calendar dates resolve deterministically for valid and invalid seeds',
+        async () => {
+          const { resolveScheduleCron } = await import('../src/server/schedules.ts');
+          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', 'b'), '0 9 28 2 *');
+          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', '9'), '0 9 29 2 *');
+          const resolved = resolveScheduleCron('0 9 H(28-31) 2 *', 'a');
+          assert.match(resolved, /^0 9 (28|29) 2 \*$/);
+          assert.equal(resolveScheduleCron('0 9 H(28-31) 2 *', 'a'), resolved);
+          for (const day of [30, 31])
+            assert.throws(() => resolveScheduleCron(`0 9 ${day} 2 *`, 'a'));
+          const schedule = await create({ cron: '0 9 H(28-31) 2 *', timeZone: 'UTC' });
+          const preview = await request('POST', `/api/schedules/${schedule.id}/preview`, {});
+          assert.equal(preview.json().nextRun, schedule.nextRun);
+          await request('DELETE', `/api/schedules/${schedule.id}`);
+        },
+      );
+
+      await t.test(
         'hashed schedules keep the same daily time across previews and dispatch',
         async (t) => {
           const previousClock = clock;
@@ -294,7 +312,7 @@ test(
         clock = new Date('2035-10-26T00:00:00.000Z');
         const schedule = await create({ cron: 'H 9 * * *', timeZone: 'UTC' });
         const job = await jobFor(schedule.id);
-        const legacyDue = '2035-10-26T09:59:00.000Z';
+        const legacyDue = '2035-10-26T08:00:00.000Z';
         await db.pool.query('UPDATE schedules SET next_run_at=$2 WHERE id=$1', [
           schedule.id,
           legacyDue,
@@ -305,7 +323,7 @@ test(
         clock = new Date(legacyDue);
         await deliver([job]);
         assert.equal((await runs(schedule.id))[0]?.scheduledFor, legacyDue);
-        assert.ok(new Date((await saved(schedule.id)).nextRun!).getTime() > clock.getTime());
+        assert.equal((await saved(schedule.id)).nextRun!.slice(0, 10), '2035-10-27');
         await request('DELETE', `/api/schedules/${schedule.id}`);
       });
 
