@@ -18,6 +18,8 @@ Ask in chat. For example:
 
 A schedule runs **One time** or is **Recurring**. Nod tells you when it's saved and when it runs next. If you ask for a schedule that's already active with the same name or instruction, time and chat, Nod keeps the one you have instead of adding a copy, and uses the model you named for it, if any. When you hand Nod work that needs follow-up, it can also plan its own check-in, such as "I'll look for a reply on Friday". Check-ins are schedules too.
 
+Recurring cron schedules with a hashed field (`H`) keep a consistent timing for each schedule. For schedules saved before this change, Nod keeps the next run that was already queued, then uses the consistent timing. The first two runs after upgrading may therefore be closer together than usual.
+
 Nod uses your time zone, saved from your browser the first time you use Nod. Change it in **Settings → General**. If Nod doesn't know your time zone, it asks.
 
 ## Change, pause or delete a schedule

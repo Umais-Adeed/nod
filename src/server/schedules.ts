@@ -5,6 +5,7 @@ import { cancellationTransaction } from './db.ts';
 import type { FastifyInstance } from 'fastify';
 import type { Pool, PoolClient } from 'pg';
 import type { Job, PgBoss } from 'pg-boss';
+import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
 import type {
   Schedule,
@@ -233,6 +234,17 @@ export function createSchedules(dependencies: ScheduleDependencies) {
   const now = dependencies.now ?? (() => new Date());
   let workerStarted = false;
 
+  function previewSchedule(
+    cron: string,
+    id: string,
+    options: { tz: string; count: number; from?: Date },
+  ) {
+    const resolved = /(?:^|[\s,])H(?=$|[\s,(\/])/i.test(cron)
+      ? CronExpressionParser.parse(cron, { hashSeed: id }).stringify()
+      : cron;
+    return scheduler.previewSchedule(resolved, options);
+  }
+
   const transaction = <T>(operation: (client: PoolClient) => Promise<T>, shared?: PoolClient) =>
     shared ? operation(shared) : inTransaction(operation, pool);
 
@@ -252,7 +264,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
       if (!input.cron || input.runAt || input.cron.split(/\s+/).length !== 5)
         throw invalid('Use a five-field cron schedule for recurring work.');
       try {
-        scheduler.previewSchedule(input.cron, { tz: input.timeZone, count: 1 });
+        previewSchedule(input.cron, 'validation', { tz: input.timeZone, count: 1 });
       } catch {
         throw invalid('Check the schedule and time zone.');
       }
@@ -262,7 +274,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
   function nextOccurrence(schedule: ScheduleRow, after = now()) {
     if (!schedule.enabled) return null;
     if (schedule.kind === 'once') return schedule.runAt;
-    return scheduler.previewSchedule(schedule.cron!, {
+    return previewSchedule(schedule.cron!, schedule.id, {
       tz: schedule.timeZone,
       count: 1,
       from: after,
@@ -271,8 +283,8 @@ export function createSchedules(dependencies: ScheduleDependencies) {
 
   async function scheduleCache(turnId: string): Promise<'short' | 'long' | undefined> {
     const row = (
-      await pool.query<{ cron: string; timeZone: string; scheduledFor: Date }>(
-        `SELECT s.cron,s.time_zone AS "timeZone",r.scheduled_for AS "scheduledFor"
+      await pool.query<{ id: string; cron: string; timeZone: string; scheduledFor: Date }>(
+        `SELECT s.id,s.cron,s.time_zone AS "timeZone",r.scheduled_for AS "scheduledFor"
          FROM schedule_runs r JOIN schedules s ON s.id=r.schedule_id AND s.owner_id=r.owner_id
          WHERE r.turn_id=$1 AND r.owner_id=$2 AND r.schedule_revision=s.revision
            AND s.enabled AND s.kind='recurring' AND s.cron IS NOT NULL`,
@@ -280,7 +292,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
       )
     ).rows[0];
     if (!row) return;
-    const next = scheduler.previewSchedule(row.cron, {
+    const next = previewSchedule(row.cron, row.id, {
       tz: row.timeZone,
       count: 1,
       from: row.scheduledFor,
@@ -843,7 +855,7 @@ export function createSchedules(dependencies: ScheduleDependencies) {
           ? recent
           : await recentTurnMedian(target);
       if (!priced.some((cost) => cost > 0)) continue;
-      const upcoming = scheduler.previewSchedule(row.cron!, { tz: row.timeZone, count: 200, from });
+      const upcoming = previewSchedule(row.cron!, row.id, { tz: row.timeZone, count: 200, from });
       const last = upcoming.at(-1)?.getTime();
       const count =
         last !== undefined && last - from.getTime() < month

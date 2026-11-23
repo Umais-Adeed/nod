@@ -261,6 +261,76 @@ test(
         UNIQUE(schedule_id,schedule_revision,scheduled_for)`);
       await personal.initialize({ workers: false });
 
+      await t.test(
+        'hashed schedules keep the same daily time across previews and dispatch',
+        async (t) => {
+          const previousClock = clock;
+          t.after(() => {
+            clock = previousClock;
+          });
+          clock = new Date('2035-10-26T00:00:00.000Z');
+          let random = 0.1;
+          t.mock.method(Math, 'random', () => random);
+          const schedule = await create({ cron: 'H 9 * * *', timeZone: 'UTC' });
+          random = 0.9;
+          const preview = await request('POST', `/api/schedules/${schedule.id}/preview`, {});
+          assert.equal(preview.json().nextRun, schedule.nextRun);
+          await personal.initialize({ workers: false });
+          assert.equal((await saved(schedule.id)).nextRun, schedule.nextRun);
+          clock = new Date(schedule.nextRun!);
+          await deliver([await jobFor(schedule.id)]);
+          const next = await saved(schedule.id);
+          assert.equal(new Date(next.nextRun!).getTime() - clock.getTime(), 24 * 60 * 60_000);
+          assert.equal((await runs(schedule.id)).length, 1);
+          await request('DELETE', `/api/schedules/${schedule.id}`);
+        },
+      );
+
+      await t.test('a previously queued hashed occurrence remains due after restart', async (t) => {
+        const previousClock = clock;
+        t.after(() => {
+          clock = previousClock;
+        });
+        clock = new Date('2035-10-26T00:00:00.000Z');
+        const schedule = await create({ cron: 'H 9 * * *', timeZone: 'UTC' });
+        const job = await jobFor(schedule.id);
+        const legacyDue = '2035-10-26T09:59:00.000Z';
+        await db.pool.query('UPDATE schedules SET next_run_at=$2 WHERE id=$1', [
+          schedule.id,
+          legacyDue,
+        ]);
+        job.data.scheduledFor = legacyDue;
+        await personal.initialize({ workers: false });
+        assert.equal((await saved(schedule.id)).nextRun, legacyDue);
+        clock = new Date(legacyDue);
+        await deliver([job]);
+        assert.equal((await runs(schedule.id))[0]?.scheduledFor, legacyDue);
+        assert.ok(new Date((await saved(schedule.id)).nextRun!).getTime() > clock.getTime());
+        await request('DELETE', `/api/schedules/${schedule.id}`);
+      });
+
+      await t.test('hashed ranges and steps retain named weekdays and time zones', async (t) => {
+        const previousClock = clock;
+        t.after(() => {
+          clock = previousClock;
+        });
+        clock = new Date('2035-10-26T00:00:00.000Z');
+        const schedule = await create({ cron: 'H(0-29)/10 9 * * MON', timeZone: 'Europe/Lisbon' });
+        const first = new Date(schedule.nextRun!);
+        assert.equal(first.toISOString().slice(0, 10), '2035-10-29');
+        assert.equal(first.getUTCHours(), 9);
+        assert.ok(first.getUTCMinutes() < 10);
+        const preview = await request('POST', `/api/schedules/${schedule.id}/preview`, {});
+        assert.equal(preview.json().nextRun, schedule.nextRun);
+        clock = first;
+        await deliver([await jobFor(schedule.id)]);
+        assert.equal(
+          new Date((await saved(schedule.id)).nextRun!).getTime() - first.getTime(),
+          600_000,
+        );
+        await request('DELETE', `/api/schedules/${schedule.id}`);
+      });
+
       await t.test('a new schedule prices recent chat requests at the selected tier', async () => {
         const { createLedger } = await import('../src/server/ledger.ts');
         const threshold = 272_000;
