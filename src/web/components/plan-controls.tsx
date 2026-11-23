@@ -316,20 +316,29 @@ export function PauseSwitch({ schedule, change }: { schedule: Schedule; change: 
 export function ScheduleEditor({
   schedule,
   change,
+  onEditingChange,
 }: {
   schedule: Schedule;
   change: ScheduleChange;
+  onEditingChange?(open: boolean): void;
 }) {
   const [editing, setEditing] = useState<Schedule | null>(null);
+  const accountVersion = requestAccountVersion();
+  const triggerId = `schedule-editor-trigger-${schedule.id}`;
+  function setOpen(open: boolean) {
+    setEditing(open ? { ...schedule } : null);
+    onEditingChange?.(open);
+  }
   return (
     <Dialog
       open={Boolean(editing)}
       onOpenChange={(open) => {
-        if (!change.busy) setEditing(open ? { ...schedule } : null);
+        if (!change.busy) setOpen(open);
       }}
     >
       <DialogTrigger asChild>
         <Button
+          id={triggerId}
           type="button"
           variant="outline"
           size="sm"
@@ -345,9 +354,18 @@ export function ScheduleEditor({
           className="schedule-editor-dialog"
           aria-describedby={undefined}
           aria-busy={change.busy}
+          onCloseAutoFocus={(event) => {
+            if (accountVersion !== requestAccountVersion()) return;
+            const trigger = document.getElementById(triggerId);
+            if (!trigger) return;
+            const target =
+              trigger.closest('details:not([open])')?.querySelector('summary') ?? trigger;
+            event.preventDefault();
+            target.focus();
+          }}
         >
           <DialogTitle>Edit schedule</DialogTitle>
-          <ScheduleEditorForm schedule={editing} change={change} onClose={() => setEditing(null)} />
+          <ScheduleEditorForm schedule={editing} change={change} onClose={() => setOpen(false)} />
         </DialogContent>
       )}
     </Dialog>

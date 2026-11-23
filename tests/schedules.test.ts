@@ -2678,6 +2678,7 @@ test('waiting scheduled runs open their pending question without starting anothe
     HTMLElement: dom.window.HTMLElement,
     Element: dom.window.Element,
     Node: dom.window.Node,
+    NodeFilter: dom.window.NodeFilter,
     Event: dom.window.Event,
     CustomEvent: dom.window.CustomEvent,
     MutationObserver: dom.window.MutationObserver,
@@ -2988,6 +2989,23 @@ test('waiting scheduled runs open their pending question without starting anothe
   };
   await act(async () => pageDataCache.refresh('/api/schedules', true));
   assert.equal(dom.window.document.querySelector('details.schedule-inactive'), null);
+  const edit = dom.window.document.querySelector<HTMLButtonElement>(
+    `button[aria-label="Edit schedule ${oneTime.title}"]`,
+  );
+  assert.ok(edit);
+  await act(async () => edit.click());
+  const draft = dom.window.document.querySelector<HTMLTextAreaElement>(
+    '.schedule-editor-dialog textarea',
+  );
+  assert.ok(draft);
+  const setValue = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLTextAreaElement.prototype,
+    'value',
+  )!.set!;
+  await act(async () => {
+    setValue.call(draft, 'Unsaved synthetic draft');
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  });
   oneTime = {
     ...oneTime,
     enabled: false,
@@ -2995,10 +3013,38 @@ test('waiting scheduled runs open their pending question without starting anothe
     activeRun: { turnId: randomUUID(), status: 'running', questionMessageId: null },
   };
   await act(async () => pageDataCache.refresh('/api/schedules', true));
+  assert.equal(dom.window.document.querySelector('.schedule-editor-dialog textarea'), draft);
+  assert.equal(draft.value, 'Unsaved synthetic draft');
+  assert.equal(
+    dom.window.document.querySelector<HTMLButtonElement>(
+      '.schedule-editor-dialog button[type="submit"]',
+    )?.disabled,
+    false,
+  );
+  await act(async () => {
+    setValue.call(draft, 'Still editable');
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  });
+  assert.equal(draft.value, 'Still editable');
+  const cancel = [
+    ...dom.window.document.querySelectorAll<HTMLButtonElement>('.schedule-editor-dialog button'),
+  ].find((button) => button.textContent?.trim() === 'Cancel');
+  assert.ok(cancel);
+  await act(async () => cancel.click());
+  assert.equal(dom.window.document.querySelector('.schedule-editor-dialog'), null);
   const inactive = dom.window.document.querySelector<HTMLDetailsElement>(
     'details.schedule-inactive',
   );
   assert.ok(inactive?.open, 'A one-time run stays visible when it moves into Inactive.');
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  const movedEdit = inactive.querySelector<HTMLButtonElement>(
+    `button[aria-label="Edit schedule ${oneTime.title}"]`,
+  );
+  assert.ok(movedEdit);
+  assert.ok(
+    dom.window.document.activeElement === movedEdit,
+    'Focus returns to the moved editor trigger.',
+  );
   oneTime = { ...oneTime, activeRun: null };
   await act(async () => pageDataCache.refresh('/api/schedules', true));
   assert.equal(inactive.open, true);

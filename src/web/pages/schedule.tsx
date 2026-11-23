@@ -25,10 +25,12 @@ export function ScheduleRow({
   schedule,
   activity,
   onAsk,
+  onEditingChange,
 }: {
   schedule: Schedule;
   activity: Activity[];
   onAsk(text: string): void;
+  onEditingChange(open: boolean): void;
 }) {
   const dateFormat = useDateFormat();
   const [showRuns, setShowRuns] = useState(false);
@@ -253,7 +255,7 @@ export function ScheduleRow({
                 {stopping ? 'Stopping…' : 'Stop this run'}
               </Button>
             )}
-            <ScheduleEditor schedule={schedule} change={change} />
+            <ScheduleEditor schedule={schedule} change={change} onEditingChange={onEditingChange} />
             <Button
               variant="ghost"
               size="sm"

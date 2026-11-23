@@ -26,7 +26,7 @@ import { taskHeadline, taskLabels } from '../../shared/task-status';
 import { InlineName } from '../components/inline-name';
 import { WorkspaceCommandDialog, WorkspaceCommandLine } from '../components/workspace-command';
 import { pageDataCache } from '../lib/page-data-cache';
-import { api } from '../lib/api';
+import { api, requestAccountVersion } from '../lib/api';
 import { PageTitle } from '../components/page-title';
 import { NewPlan, PlanToast, ScheduleTask } from '../components/plan-controls';
 import { Button, Loading, Notice } from '../components/ui';
@@ -469,10 +469,18 @@ export function Scheduled({
 }) {
   const schedules = usePageData<Schedule[]>('/api/schedules');
   const tasks = usePageData<Task[]>('/api/tasks');
+  const account = requestAccountVersion();
+  const [editing, setEditing] = useState<{ id: string; upcoming: boolean; account: number } | null>(
+    null,
+  );
   const open = (tasks.data ?? []).filter((task) => !closed(task));
   const upcoming = (schedules.data ?? [])
-    .filter((schedule) => schedule.enabled && schedule.nextRun)
-    .sort((a, b) => a.nextRun!.localeCompare(b.nextRun!) || a.id.localeCompare(b.id));
+    .filter((schedule) =>
+      editing?.account === account && editing.id === schedule.id
+        ? editing.upcoming
+        : schedule.enabled && schedule.nextRun,
+    )
+    .sort((a, b) => (a.nextRun ?? '').localeCompare(b.nextRun ?? '') || a.id.localeCompare(b.id));
   const inactive = (schedules.data ?? []).filter((schedule) => !upcoming.includes(schedule));
   const inactiveGroup = useRef<HTMLDetailsElement>(null);
   const showInactiveByDefault = upcoming.length === 0;
@@ -483,6 +491,15 @@ export function Scheduled({
     if (hasActiveInactiveSchedule && inactiveGroup.current) inactiveGroup.current.open = true;
   }, [hasActiveInactiveSchedule, showInactiveByDefault]);
   const empty = Boolean(schedules.data && !schedules.data.length);
+  const scheduleRow = (schedule: Schedule, upcoming: boolean) => (
+    <ScheduleRow
+      key={`${account}:${schedule.id}`}
+      schedule={schedule}
+      activity={activity}
+      onAsk={onAsk}
+      onEditingChange={(open) => setEditing(open ? { id: schedule.id, upcoming, account } : null)}
+    />
+  );
   return (
     <div className="content-page secondary-page tasks-page">
       <PlanToast />
@@ -518,14 +535,7 @@ export function Scheduled({
         <>
           {upcoming.length ? (
             <div className="saved-plan-list">
-              {upcoming.map((schedule) => (
-                <ScheduleRow
-                  key={schedule.id}
-                  schedule={schedule}
-                  activity={activity}
-                  onAsk={onAsk}
-                />
-              ))}
+              {upcoming.map((schedule) => scheduleRow(schedule, true))}
             </div>
           ) : empty ? (
             <section className="schedule-empty" aria-labelledby="schedule-empty-title">
@@ -550,14 +560,7 @@ export function Scheduled({
                 <ChevronDown size={16} aria-hidden="true" />
               </summary>
               <div className="saved-plan-list">
-                {inactive.map((schedule) => (
-                  <ScheduleRow
-                    key={schedule.id}
-                    schedule={schedule}
-                    activity={activity}
-                    onAsk={onAsk}
-                  />
-                ))}
+                {inactive.map((schedule) => scheduleRow(schedule, false))}
               </div>
             </details>
           )}
