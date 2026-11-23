@@ -2352,6 +2352,7 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
   let current: Schedule | null = schedule;
   const mutations: string[] = [];
   const attempts: string[] = [];
+  let lostResponse = false;
   let mutationDelay = 650;
   let finishAfterAbort = false;
   let holdNextMutation = false;
@@ -2363,13 +2364,27 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
       reads++;
       return Response.json(current ? [current] : []);
     }
-    if (options.method === 'PATCH') {
-      const body = JSON.parse(String(options.body));
+    const body =
+      options.method === 'PATCH'
+        ? (JSON.parse(String(options.body)) as {
+            enabled?: boolean;
+            title?: string;
+            expectedRevision: number;
+          })
+        : undefined;
+    if (body) {
+      if (lostResponse) {
+        attempts.push('PATCH');
+        current = { ...schedule, enabled: false, revision: 4 };
+        throw new TypeError('Lost response');
+      }
       assert.deepEqual(
         body,
-        'title' in body
-          ? { title: 'My unsaved title', expectedRevision: 1 }
-          : { enabled: false, expectedRevision: 1 },
+        body.enabled === true
+          ? { enabled: true, expectedRevision: 2 }
+          : 'title' in body
+            ? { title: 'My unsaved title', expectedRevision: 1 }
+            : { enabled: false, expectedRevision: 1 },
       );
     } else assert.equal(options.method, 'DELETE');
     attempts.push(options.method);
@@ -2378,13 +2393,18 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
     holdNextMutation = false;
     return new Promise<Response>((resolve, reject) => {
       const commit = () => {
-        if (options.method === 'PATCH') {
-          if (current?.revision !== 1) {
+        if (body) {
+          if (!current || current.revision !== body.expectedRevision) {
             resolve(Response.json({ error: 'Schedule changed.' }, { status: 409 }));
             return;
           }
-          mutations.push(options.method);
-          current = { ...schedule, enabled: false, revision: 2 };
+          mutations.push('PATCH');
+          current = {
+            ...current,
+            enabled: body.enabled ?? current.enabled,
+            title: body.title ?? current.title,
+            revision: current.revision + 1,
+          };
           resolve(Response.json(current));
         } else {
           if (!current) {
@@ -2490,6 +2510,28 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
     dom.window.document.querySelector('[role="switch"]')?.hasAttribute('disabled'),
     false,
   );
+  assert.ok(buttonByText('Undo'));
+  await clickButton('Undo');
+  await waitFor(() => current?.enabled === true && mutations.length === 2, 'confirmed undo');
+  current = schedule;
+  mutations.length = 0;
+  attempts.length = 0;
+  lostResponse = true;
+  await click('[role="switch"]');
+  await waitFor(
+    () =>
+      pageDataCache.getSnapshot<Schedule[]>('/api/schedules').data?.[0]?.revision === 4 &&
+      dom.window.document.querySelector('[role="switch"]')?.hasAttribute('disabled') === false,
+    'observed pause',
+  );
+  assert.ok(!buttonByText('Undo'));
+  assert.deepEqual(attempts, ['PATCH']);
+  lostResponse = false;
+  current = { ...schedule, enabled: false, revision: 2 };
+  mutations.length = 0;
+  mutations.push('PATCH');
+  attempts.length = 0;
+  attempts.push('PATCH');
   await click('button[aria-label="Delete schedule Delayed schedule"]');
   await click('.delete-plan-actions button.button-destructive');
   assert.match(
@@ -2519,10 +2561,7 @@ test('scheduled controls reconcile pause and delete after a client timeout', asy
     'pause after client timeout',
   );
   assert.equal(current.enabled, false);
-  assert.match(
-    dom.window.document.querySelector('.plan-toast')?.textContent ?? '',
-    /Paused Delayed schedule/,
-  );
+  assert.ok(!buttonByText('Undo'));
   assert.equal(
     dom.window.document.querySelector('[role="switch"]')?.hasAttribute('disabled'),
     false,

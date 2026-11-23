@@ -152,7 +152,7 @@ export function useDirectChange(id: string) {
     if (result.schedules) pageDataCache.update<Schedule[]>(schedulesPath, () => result.schedules!);
     if (result.status === 'confirmed') {
       const saved = result.schedules.find((schedule) => schedule.id === id)!;
-      complete(saved, change.note, change.undo);
+      complete(saved, `Current settings for ${saved.title} match your requested change.`);
       void pageDataCache.refresh(schedulesPath, true);
       return;
     }
