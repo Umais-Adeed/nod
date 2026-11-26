@@ -1030,7 +1030,7 @@ test('memory notes keep their line breaks from every writer while other control 
   assert.deepEqual(replacing(['about/old-signoff'], ['about/old-signoff']), []);
 });
 
-test('a memory import matches notes across the batch and the saved notes, and refuses an oversized batch', async () => {
+test('a memory import matches notes across the batch and the saved notes', async () => {
   const memory = createMemoryService({
     pool: {} as pg.Pool,
     ownerId: 'import-owner',
@@ -1060,16 +1060,6 @@ test('a memory import matches notes across the batch and the saved notes, and re
   const entries = (await memory.load()).entries;
   assert.equal(entries.find((entry) => entry.slug === 'jazz')?.origin, 'stated');
   assert.equal(entries.length, 3);
-  const many = Array.from({ length: 1001 }, (_, index) => ({
-    area: 'about',
-    text: `Synthetic note ${index}`,
-  }));
-  await assert.rejects(memory.importNotes({ notes: many }), {
-    statusCode: 400,
-    message: 'Import up to 1000 notes at a time.',
-  });
-  assert.equal((await memory.load()).entries.length, 3);
-  assert.equal((await memory.importNotes({ notes: many.slice(1) })).added, 1000);
 });
 
 test('repair archives expired, stale and duplicate entries, keeps distinct numbers and never deletes', () => {

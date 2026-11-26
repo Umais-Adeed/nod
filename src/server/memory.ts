@@ -38,7 +38,6 @@ import {
 
 const key = 'memory/MEMORY.md';
 const nilId = '00000000-0000-0000-0000-000000000000';
-const maxImportNotes = 1000;
 const flat = (value: string) => value.replace(/\s+/g, ' ').trim();
 const findInput = z.object({ query: z.string().trim().min(1), area: area.optional() }).strict();
 const readInput = z.object({ path: z.union([area, path]) }).strict();
@@ -278,9 +277,7 @@ export function createMemoryService(options: {
   }
 
   async function importNotes(raw: unknown) {
-    const { notes } = importInput.parse(raw);
-    if (notes.length > maxImportNotes) fail(`Import up to ${maxImportNotes} notes at a time.`);
-    return adopt(notes);
+    return adopt(importInput.parse(raw).notes);
   }
 
   async function restate(raw: unknown) {
